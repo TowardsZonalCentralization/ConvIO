@@ -1,49 +1,85 @@
+"""
+Dijkstra Algorithm for optimising the wiring harness of a truck, with a GUI for user interaction.
+"""
+
 import json
 import os
 import heapq
 import logging
+import threading
+from typing import Tuple, List, Dict, Optional
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from typing import Tuple, List, Dict
+from matplotlib.animation import FuncAnimation
+from mpl_toolkits.mplot3d import Axes3D 
+import networkx as nx
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# ----------------------------- Logging Setup -----------------------------
 
+def configure_logging(log_file: str):
+    """Configure logging to file and console."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
 
-class DijkstraVisualizer:
-    def __init__(self, input_file: str, output_dir: str):
-        self.input_file = input_file
-        self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)
-        self.graph_data = self.load_graph()
+# ----------------------------- Graph Utilities -----------------------------
 
-    def load_graph(self) -> Dict:
-        """Load the graph data from a JSON file."""
-        try:
-            with open(self.input_file, 'r') as f:
-                data = json.load(f)
-            logging.info("Graph data successfully loaded from %s", self.input_file)
-            return data
-        except FileNotFoundError:
-            logging.error("Input file not found: %s", self.input_file)
-            raise
-        except json.JSONDecodeError:
-            logging.error("Failed to decode JSON from file: %s", self.input_file)
-            raise
+class Graph:
+    """Graph representation including nodes, edges, and coordinates."""
+    def __init__(self, data: Dict):
+        self.nodes = data.get("nodes", [])
+        self.edges = data.get("edges", {})
+        self.coordinates = data.get("coordinates", {})
+        self.validate()
 
-    def dijkstra(self, start_node: str) -> Tuple[Dict[str, float], Dict[str, str]]:
-        """Compute shortest paths using Dijkstra's algorithm."""
-        distances = {node: float('inf') for node in self.graph_data['nodes']}
-        predecessors = {node: None for node in self.graph_data['nodes']}
-        distances[start_node] = 0
-        pq = [(0, start_node)]
+    def validate(self):
+        """Validates graph data integrity."""
+        if len(self.nodes) != len(set(self.nodes)):
+            raise ValueError("Duplicate nodes found in graph.")
+
+        for node, neighbors in self.edges.items():
+            for neighbor, weight in neighbors:
+                if neighbor not in self.nodes:
+                    raise ValueError(f"Undefined node in edges: {neighbor}")
+                if float(weight) < 0:
+                    raise ValueError(f"Negative weight detected between {node} and {neighbor}")
+
+    @staticmethod
+    def load_from_file(file_path: str) -> 'Graph':
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        return Graph(data)
+
+# ----------------------------- Dijkstra Algorithm -----------------------------
+
+class DijkstraSolver:
+    """Solves shortest path using Dijkstra's algorithm."""
+    def __init__(self, graph: Graph):
+        self.graph = graph
+
+    def solve(self, start: str) -> Tuple[Dict[str, float], Dict[str, Optional[str]]]:
+        distances = {node: float('inf') for node in self.graph.nodes}
+        predecessors = {node: None for node in self.graph.nodes}
+        visited = set()
+
+        distances[start] = 0
+        pq = [(0, start)]  
 
         while pq:
             current_distance, current_node = heapq.heappop(pq)
-            for neighbor, weight in self.graph_data['edges'].get(current_node, []):
-                distance = current_distance + weight
+            if current_node in visited:
+                continue
+            visited.add(current_node)
+
+            for neighbor, weight in self.graph.edges.get(current_node, []):
+                distance = current_distance + float(weight)
                 if distance < distances[neighbor]:
                     distances[neighbor] = distance
                     predecessors[neighbor] = current_node
@@ -51,91 +87,95 @@ class DijkstraVisualizer:
 
         return distances, predecessors
 
-    def construct_path(self, predecessors: Dict[str, str], target: str) -> List[str]:
-        """Construct the shortest path from the start node to the target."""
+    @staticmethod
+    def reconstruct_path(predecessors: Dict[str, Optional[str]], target: str) -> List[str]:
+        """Reconstruct the shortest path to the target node."""
         path = []
         while target:
             path.insert(0, target)
             target = predecessors[target]
         return path
 
-    def visualize_graph(self, path: List[str], total_distance: float):
-        """Visualize the node graph in 3D and highlight the shortest path."""
-        try:
-            fig = plt.figure(figsize=(12, 8))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_xlabel('X (cm)')
-            ax.set_ylabel('Y (cm)')
-            ax.set_zlabel('Z (cm)')
+# ----------------------------- Visualization -----------------------------
 
-            # Adjust scale
-            ax.set_box_aspect([1, 1, 1])
+class GraphVisualizer:
+    @staticmethod
+    def animate(graph: Graph, path: List[str]):
+        """3D animation of the shortest path traversal."""
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.set_title("Optimised Wiring Harness Path")
+        ax.set_xlabel("X-axis (cm)")
+        ax.set_ylabel("Y-axis (cm)")
+        ax.set_zlabel("Z-axis (cm)")
 
-            pos_map = {node: tuple(coord) for node, coord in self.graph_data['coordinates'].items()}
+        distance_text = ax.text2D(0.05, 0.95, "Total length of wiring harness : 0 cm", transform=ax.transAxes)
 
-            for node, (x, y, z) in pos_map.items():
+        all_coords = list(graph.coordinates.values())
+        x_vals, y_vals, z_vals = zip(*all_coords)
+        max_range = max(
+            max(x_vals) - min(x_vals),
+            max(y_vals) - min(y_vals),
+            max(z_vals) - min(z_vals)
+        ) / 2
+        mid_x = (max(x_vals) + min(x_vals)) / 2
+        mid_y = (max(y_vals) + min(y_vals)) / 2
+        mid_z = (max(z_vals) + min(z_vals)) / 2
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+        def draw_base():
+            for node, (x, y, z) in graph.coordinates.items():
                 ax.scatter(x, y, z, color='blue', s=40)
-                ax.text(x + 0.5, y + 0.5, z + 0.5, node, fontsize=8)
-
-            for node, edges in self.graph_data['edges'].items():
+                ax.text(x, y, z + 1, node, fontsize=9)
+            for node, edges in graph.edges.items():
                 for neighbor, _ in edges:
-                    x_vals = [pos_map[node][0], pos_map[neighbor][0]]
-                    y_vals = [pos_map[node][1], pos_map[neighbor][1]]
-                    z_vals = [pos_map[node][2], pos_map[neighbor][2]]
+                    x_vals = [graph.coordinates[node][0], graph.coordinates[neighbor][0]]
+                    y_vals = [graph.coordinates[node][1], graph.coordinates[neighbor][1]]
+                    z_vals = [graph.coordinates[node][2], graph.coordinates[neighbor][2]]
                     ax.plot(x_vals, y_vals, z_vals, color='gray', linewidth=0.8)
 
-            for i in range(len(path) - 1):
-                a, b = path[i], path[i + 1]
-                x_vals = [pos_map[a][0], pos_map[b][0]]
-                y_vals = [pos_map[a][1], pos_map[b][1]]
-                z_vals = [pos_map[a][2], pos_map[b][2]]
-                ax.plot(x_vals, y_vals, z_vals, color='red', linewidth=3)
+        draw_base()
 
-            midpoint = pos_map[path[len(path)//2]]
-            ax.text(midpoint[0], midpoint[1], midpoint[2] + 10, f"Distance: {total_distance:.2f} cm", fontsize=10, color='green')
+        line, = ax.plot([], [], [], color='red', linewidth=3)
+        cumulative_distance = [0.0]
 
-            plt.title('Truck Chassis Node Graph with Shortest Path', fontsize=14)
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.output_dir, 'graph_visualization.png'))
-            plt.close()
-            logging.info("Graph visualization saved.")
-        except Exception as e:
-            logging.error("Error during graph visualization: %s", e)
-            raise
+        def euclidean(p1, p2):
+            return sum((a - b) ** 2 for a, b in zip(p1, p2)) ** 0.5
 
-    def export_results(self, distances: Dict[str, float], predecessors: Dict[str, str], shortest_path: List[str], total_distance: float):
-        """Export Dijkstra results to a JSON file."""
-        try:
-            results = {
-                "distances": distances,
-                "predecessors": predecessors,
-                "shortest_path": shortest_path,
-                "total_distance_cm": total_distance
-            }
-            output_path = os.path.join(self.output_dir, 'dijkstra_results.json')
-            with open(output_path, 'w') as f:
-                json.dump(results, f, indent=4)
-            logging.info("Results exported to %s", output_path)
-        except Exception as e:
-            logging.error("Failed to export results: %s", e)
-            raise
+        def update(frame):
+            xs, ys, zs = zip(*[graph.coordinates[n] for n in path[:frame + 1]])
+            line.set_data(xs, ys)
+            line.set_3d_properties(zs)
 
-    def run(self):
-        try:
-            start_node = self.graph_data['start']
-            target_node = self.graph_data['target']
+            if frame > 0:
+                last = graph.coordinates[path[frame - 1]]
+                current = graph.coordinates[path[frame]]
+                step = euclidean(last, current)
+                cumulative_distance[0] += step
+                distance_text.set_text(f"Total length of wiring harness : {cumulative_distance[0]:.2f} cm")
 
-            distances, predecessors = self.dijkstra(start_node)
-            shortest_path = self.construct_path(predecessors, target_node)
-            total_distance = distances[target_node]
+            return line, distance_text
 
-            self.visualize_graph(shortest_path, total_distance)
-            self.export_results(distances, predecessors, shortest_path, total_distance)
+        anim = FuncAnimation(fig, update, frames=len(path), interval=800, repeat=False)
+        plt.show()
 
-            messagebox.showinfo("Success", "Dijkstra algorithm executed successfully. Results saved.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Execution failed: {str(e)}")
+    @staticmethod
+    def export(distances: Dict[str, float], predecessors: Dict[str, Optional[str]],
+               path: List[str], total_distance: float, output_dir: str):
+        """Export results to a JSON file."""
+        results = {
+            "distances": distances,
+            "predecessors": predecessors,
+            "shortest_path": path,
+            "total_distance_cm": total_distance
+        }
+        with open(os.path.join(output_dir, 'dijkstra_results.json'), 'w') as f:
+            json.dump(results, f, indent=4)
+        logging.info("Results exported.")
 
+# ----------------------------- GUI Interface -----------------------------
 
 class DijkstraApp:
     def __init__(self, root):
@@ -144,19 +184,31 @@ class DijkstraApp:
 
         self.input_file = tk.StringVar()
         self.output_dir = tk.StringVar()
+        self.start_node = tk.StringVar()
+        self.target_node = tk.StringVar()
 
-        tk.Label(root, text="Which configuration of the truck do you want to optimize?(Hint- Input a json file of the respective truck)").grid(row=0, column=0, sticky='w')
-        tk.Entry(root, textvariable=self.input_file, width=50).grid(row=0, column=1)
-        tk.Button(root, text="Browse", command=self.browse_input).grid(row=0, column=2)
+        self.build_gui()
 
-        tk.Label(root, text="Output Directory").grid(row=1, column=0, sticky='w')
-        tk.Entry(root, textvariable=self.output_dir, width=50).grid(row=1, column=1)
-        tk.Button(root, text="Browse", command=self.browse_output).grid(row=1, column=2)
+    def build_gui(self):
+        """Create GUI layout and controls."""
+        tk.Label(self.root, text="Truck config (JSON)").grid(row=0, column=0, sticky='w')
+        tk.Entry(self.root, textvariable=self.input_file, width=50).grid(row=0, column=1)
+        tk.Button(self.root, text="Browse", command=self.browse_input).grid(row=0, column=2)
 
-        tk.Button(root, text="Run Dijkstra", command=self.run_dijkstra).grid(row=2, column=1, pady=10)
+        tk.Label(self.root, text="Output Directory").grid(row=1, column=0, sticky='w')
+        tk.Entry(self.root, textvariable=self.output_dir, width=50).grid(row=1, column=1)
+        tk.Button(self.root, text="Browse", command=self.browse_output).grid(row=1, column=2)
+
+        tk.Label(self.root, text="Start Node").grid(row=2, column=0, sticky='w')
+        tk.Entry(self.root, textvariable=self.start_node, width=50).grid(row=2, column=1)
+
+        tk.Label(self.root, text="Target Node").grid(row=3, column=0, sticky='w')
+        tk.Entry(self.root, textvariable=self.target_node, width=50).grid(row=3, column=1)
+
+        tk.Button(self.root, text="RUN", command=self.run_dijkstra).grid(row=4, column=1, pady=10)
 
     def browse_input(self):
-        file_path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
+        file_path = filedialog.askopenfilename(filetypes=[["JSON Files", "*.json"]])
         if file_path:
             self.input_file.set(file_path)
 
@@ -166,18 +218,36 @@ class DijkstraApp:
             self.output_dir.set(directory)
 
     def run_dijkstra(self):
-        input_path = self.input_file.get()
-        output_path = self.output_dir.get()
+        try:
+            input_path = self.input_file.get()
+            output_path = self.output_dir.get()
+            start = self.start_node.get()
+            target = self.target_node.get()
 
-        if not input_path or not output_path:
-            messagebox.showerror("Input Error", "Both input file and output directory must be selected.")
-            return
+            if not all([input_path, output_path, start, target]):
+                messagebox.showerror("Input Error", "All input fields must be filled.")
+                return
 
-        visualizer = DijkstraVisualizer(input_path, output_path)
-        visualizer.run()
+            configure_logging(os.path.join(output_path, 'dijkstra_log.txt'))
 
+            graph = Graph.load_from_file(input_path)
+            solver = DijkstraSolver(graph)
+            distances, predecessors = solver.solve(start)
+            path = solver.reconstruct_path(predecessors, target)
+            total_distance = distances.get(target, float('inf'))
+
+            GraphVisualizer.export(distances, predecessors, path, total_distance, output_path)
+            self.root.after(0, lambda: GraphVisualizer.animate(graph, path))
+            messagebox.showinfo("Success", "Execution completed successfully.")
+
+        except Exception as e:
+            logging.exception("Error in Dijkstra run")
+            messagebox.showerror("Error", str(e))
+
+# ----------------------------- Entry Point -----------------------------
 
 if __name__ == '__main__':
     root = tk.Tk()
     app = DijkstraApp(root)
     root.mainloop()
+
