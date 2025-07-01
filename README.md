@@ -1,5 +1,6 @@
 # Zonal Convergence
 
+
 ## Overview
 Zonal Convergence is a Python-based toolkit designed for optimizing the I/O wiring architecture in commercial truck platforms. The project leverages clustering and pathfinding algorithms to achieve efficient wiring topology by:
 - Clustering I/O signals based on spatial proximity and functional zones using **K-Means**.
@@ -60,3 +61,5 @@ ZonalConvergence/
 ├── requirements
 └──README.md              # Project documentation
 ```
+### Maintainers - Lucas Mauser, Harshawardhan Patil
+### Note- The project is under development and gets updated frequently, Please pull the latest version before running.
