@@ -23,13 +23,18 @@ This repository facilitates the reduction of wiring complexity and supports the 
 ## Directory Structure
 ```text
 ZonalConvergence/
-├── data/                   # Input datasets (CSV, JSON, etc.)
-├── results/                # Output clusters and path metrics
-├── scripts/
-│   ├── kmeans_clustering.py
-│   ├── dijkstra_pathfinder.py
-│   └── utils.py
-├── README.md              # Project documentation
-├── requirements.txt       # Python dependencies
-└── main.py                # Execution entry point
+├── k-means/
+│   ├── data
+│   ├── notebooks
+│   ├── requirements
+│   ├── Results
+│   ├── src                # Source codes
+│   └── README.md                  
+├── dijkstra
+│   ├── node_graphs
+│   ├── requirements
+│   ├── results
+│   ├── src                # Source codes
+│   └── README.md 
+└──README.md              # Project documentation
 
