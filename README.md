@@ -19,6 +19,29 @@ This repository facilitates the reduction of wiring complexity and supports the 
   - Generates visual and quantitative analysis of wiring length and efficiency.
 
 ---
+## 🛠 Installation
+
+### Prerequisites
+- Python 3.8 or above
+- Recommended IDE: VSCode                    
+
+### Steps
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/ZonalConvergence.git
+cd ZonalConvergence
+
+# (Optional) Create a virtual environment
+python -m venv venv
+source venv/bin/activate        # On Windows: venv\Scripts\activate
+
+# Install required dependencies
+# Navigate to requirements
+cd requirements
+# Run the following PIP command
+pip install -r requirements.txt
+```
+
 
 ## Directory Structure
 ```text
@@ -26,15 +49,14 @@ ZonalConvergence/
 ├── k-means/
 │   ├── data
 │   ├── notebooks
-│   ├── requirements
 │   ├── Results
 │   ├── src                # Source codes
 │   └── README.md                  
 ├── dijkstra
 │   ├── node_graphs
-│   ├── requirements
 │   ├── results
 │   ├── src                # Source codes
-│   └── README.md 
+│   └── README.md
+├── requirements
 └──README.md              # Project documentation
-
+```
