@@ -61,5 +61,5 @@ ZonalConvergence/
 ├── requirements
 └──README.md              # Project documentation
 ```
-### Maintainers - Lucas Mauser, Harshawardhan Patil
+### Maintainers - Harshawardhan Patil, Lucas Mauser
 ### Note- The project is under development and gets updated frequently, Please pull the latest version before running.
