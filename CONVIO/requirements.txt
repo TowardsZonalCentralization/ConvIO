@@ -1,0 +1,9 @@
+numpy
+networkx
+pyqtgraph
+PyQt5
+matplotlib
+scikit-learn
+pyyaml
+scipy
+reportlab
