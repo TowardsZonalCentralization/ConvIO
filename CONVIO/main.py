@@ -1,4 +1,24 @@
-""" Automotive Wiring Harness Optimizer - Main Application """
+"""
+CONVIO - Main Application
+=========================
+
+This is the main entry point for the CONVIO application.
+It provides a graphical user interface (GUI) built with PyQt5 for loading,
+processing, and visualizing wiring harness data.
+
+The application is structured as follows:
+- ConfigManager: Handles loading and validation of the `config.yaml` file.
+- OptimizationWorker: Runs heavy computations (graph loading, clustering, etc.)
+  in a separate thread to keep the GUI responsive.
+- WiringHarnessOptimizer: The main window class that orchestrates the UI,
+  event handling, and visualization.
+
+The workflow is designed to be sequential:
+1.  Load a chassis graph (JSON) and I/O coordinates (CSV).
+2.  Run an elbow method analysis to determine the optimal number of clusters.
+3.  Perform clustering and centroid optimization.
+4.  Calculate a baseline direct wiring from the HPC for comparison.
+"""
 
 import sys
 import os
@@ -33,11 +53,6 @@ from modules.graph_loader import create_graph_loader_from_config
 from modules.elbow_method import ElbowMethodAnalyzer
 from modules.clustering_dijkstra import ClusteringDijkstra
 from modules.hpc_connector import calculate_direct_hpc_wiring
-
-
-
-
-
 
 
 class ConfigManager:
@@ -132,7 +147,6 @@ class OptimizationWorker(QThread):
         self.task_type = task_type
         self.config = config_manager
         self.kwargs = kwargs
-       
 
     def run(self):
         try:
@@ -155,8 +169,6 @@ class OptimizationWorker(QThread):
             self.status_updated.emit("Loading graph data...")
             self.progress_updated.emit(10)
         
-           
-            # YAML-driven loader
             loader = create_graph_loader_from_config(self.config.config)
             self.progress_updated.emit(25)
             
@@ -164,25 +176,23 @@ class OptimizationWorker(QThread):
             graph = loader.load_chassis_graph(self.kwargs['chassis_file'])
             self.progress_updated.emit(50)
             
-            # Load IO and add IO nodes
             self.status_updated.emit("Loading I/O coordinates...")
             io_points = loader.load_io_coordinates_from_csv(self.kwargs['io_file'])
-            enhanced_graph = loader.add_io_nodes_to_graph(graph, io_points)
+            network_graph = loader.add_io_nodes_to_graph(graph, io_points)
             self.progress_updated.emit(75)
             
-            # Export enhanced graph
-            export_path = loader.export_enhanced_graph_json()
+            export_path = loader.export_network_graph_json()
             self.status_updated.emit(f"Exported to: {os.path.basename(export_path)}")
             self.progress_updated.emit(90)
             
             # Stats and validation
-            stats = self._get_graph_statistics(enhanced_graph)
-            validation = self._validate_graph(enhanced_graph)
+            stats = self._get_graph_statistics(network_graph)
+            validation = self._validate_graph(network_graph)
             self.progress_updated.emit(100)
             
             self.status_updated.emit("Graph loading completed!")
             
-            return {"graph": enhanced_graph, 
+            return {"graph": network_graph, 
                     "loader": loader,
                     "statistics": stats,
                     "validation": validation,
@@ -234,7 +244,7 @@ class OptimizationWorker(QThread):
     def hpc_wiring_task(self):
         
         def _hpc_wiring_internal():
-            self.status_updated.emit("Calculating HPC wiring...")
+            self.status_updated.emit("Calculating Overall wiring...")
             results = calculate_direct_hpc_wiring(self.kwargs['graph'], self.config.config)
             return {"hpc_wiring_results": results}
     
@@ -242,7 +252,7 @@ class OptimizationWorker(QThread):
             result = _hpc_wiring_internal()
             self.finished.emit(result)
         except Exception as e:
-            self.error_occurred.emit(f"HPC wiring calculation failed: {e}")
+            self.error_occurred.emit(f"Overall wiring calculation failed: {e}")
 
     def _get_graph_statistics(self, graph):
         """Get basic graph statistics."""
@@ -289,8 +299,6 @@ class WiringHarnessOptimizer(QMainWindow):
         self.config = config_manager
         self.logger = logging.getLogger(__name__)
         
-        # State variables
-      
         self.current_graph = None
         self.graph_loader = None
         self.elbow_data: Optional[Dict[str, Any]] = None
@@ -308,16 +316,15 @@ class WiringHarnessOptimizer(QMainWindow):
         """Apply configuration settings to the GUI."""
         gui_cfg = self.config.get("gui", {})
         window_size = gui_cfg.get("window_size", [1500, 900])
-        self.setWindowTitle("Automotive Wiring Harness Optimizer")
+        self.setWindowTitle("CONVIO - Automotive Wiring Harness Optimizer")
         self.setGeometry(100, 100, int(window_size[0]), int(window_size[1]))
         self.show_grid = bool(gui_cfg.get("show_grid", True))
         
         cost_cfg = self.config.get("cost", {})
         self.cost_cfg = {
-            "currency": cost_cfg.get("currency", "USD"),
+            "currency": cost_cfg.get("currency", "EURO"),
             "wire_price_per_m": float(cost_cfg.get("wire_price_per_m", 0.0)),
-            "connector_price_each": float(cost_cfg.get("connector_price_each", 0.0)),
-            "labor_price_per_m": float(cost_cfg.get("labor_price_per_m", 0.0)),
+            "CAN_bus_price_per_m": float(cost_cfg.get("CAN_bus_price_per_m", 0.0)),
         }
 
     def _setup_reproducibility(self):
@@ -378,10 +385,8 @@ class WiringHarnessOptimizer(QMainWindow):
 
         # Tools menu
         tools_menu = menubar.addMenu("Tools")
-        
-        act_process_all = QAction("Process All Steps", self)
-        act_process_all.triggered.connect(self.process_all_steps)
-        tools_menu.addAction(act_process_all)
+        #To be discussed
+
 
         # Help menu
         help_menu = menubar.addMenu("Help")
@@ -397,7 +402,7 @@ class WiringHarnessOptimizer(QMainWindow):
         layout = QVBoxLayout(panel)
 
         # Title
-        title = QLabel("Wiring Harness Optimizer")
+        title = QLabel("CONVIO Control Panel")
         title.setFont(QFont("Arial", 16, QFont.Bold))
         layout.addWidget(title)
 
@@ -443,9 +448,26 @@ class WiringHarnessOptimizer(QMainWindow):
         el_layout.addWidget(self.optimal_clusters_label)
 
         layout.addWidget(elbow_group)
+        
+        # Step 3: Overall wiring Analysis
+        hpc_group = QGroupBox("Step 3: Overall wiring Analysis")
+        hpc_layout = QVBoxLayout(hpc_group)
 
-        # Step 3: Clustering
-        cl_group = QGroupBox("Step 3: Clustering & Optimization")
+        self.hpc_btn = QPushButton("Calculate Overall Wiring")
+        self.hpc_btn.clicked.connect(self.run_hpc_analysis)
+        self.hpc_btn.setEnabled(False)
+
+        self.hpc_total_label = QLabel("Overall Total Length: Not calculated")
+        self.hpc_cost_label = QLabel("Cost: Not calculated")
+
+        hpc_layout.addWidget(self.hpc_btn)
+        hpc_layout.addWidget(self.hpc_total_label)
+        hpc_layout.addWidget(self.hpc_cost_label)
+
+        layout.addWidget(hpc_group)
+        
+        # Step 4: Clustering
+        cl_group = QGroupBox("Step 4: Clustering & Optimization")
         cl_layout = QGridLayout(cl_group)
 
         cl_layout.addWidget(QLabel("Number of Clusters:"), 0, 0)
@@ -461,29 +483,22 @@ class WiringHarnessOptimizer(QMainWindow):
         self.clustering_btn.setEnabled(False)
         cl_layout.addWidget(self.clustering_btn, 1, 0, 1, 2)
 
+        self.clustering_total_label = QLabel("Clustering Total Length: Not calculated")
+        cl_layout.addWidget(self.clustering_total_label, 2, 0, 1, 2)
+
+        self.clustering_cost_label = QLabel("Cost: Not calculated")
+        cl_layout.addWidget(self.clustering_cost_label, 3, 0, 1, 2)
+
+        self.clustering_with_can_label = QLabel("Total with CAN FD: Not calculated")
+        cl_layout.addWidget(self.clustering_with_can_label, 4, 0, 1, 2)
+
+        self.clustering_with_can_cost_label = QLabel("Cost: Not calculated")
+        cl_layout.addWidget(self.clustering_with_can_cost_label, 5, 0, 1, 2)
+
         layout.addWidget(cl_group)
 
-        # Step 4: HPC Analysis
-        hpc_group = QGroupBox("Step 4: HPC Baseline Analysis")
-        hpc_layout = QVBoxLayout(hpc_group)
+        
 
-        self.hpc_btn = QPushButton("Calculate HPC Wiring")
-        self.hpc_btn.clicked.connect(self.run_hpc_analysis)
-        self.hpc_btn.setEnabled(False)
-
-        self.hpc_total_label = QLabel("HPC Total Length: Not calculated")
-
-        hpc_layout.addWidget(self.hpc_btn)
-        hpc_layout.addWidget(self.hpc_total_label)
-
-        layout.addWidget(hpc_group)
-
-        # Process All Button
-        self.btn_process_all = QPushButton("🚀 Process All Steps")
-        self.btn_process_all.clicked.connect(self.process_all_steps)
-        self.btn_process_all.setEnabled(False)
-        self.btn_process_all.setStyleSheet("QPushButton { font-weight: bold; padding: 10px; }")
-        layout.addWidget(self.btn_process_all)
 
         # Progress and status
         self.progress_bar = QProgressBar()
@@ -516,22 +531,23 @@ class WiringHarnessOptimizer(QMainWindow):
 
         # Graph View
         self.graph_view = pg.PlotWidget()
-        self._setup_pg_view(self.graph_view, 'Enhanced Graph')
-        self.tab_widget.addTab(self.graph_view, "Enhanced Graph")
+        self._setup_pg_view(self.graph_view, 'Network Graph')
+        self.tab_widget.addTab(self.graph_view, "Network Graph")
 
-        # Elbow Analysis
         self.elbow_widget = MatplotlibWidget()
         self.tab_widget.addTab(self.elbow_widget, "Elbow Analysis")
-
+        
+        # Overall Wiring
+        self.hpc_view = pg.PlotWidget()
+        self._setup_pg_view(self.hpc_view, 'Overall Wiring')
+        self.tab_widget.addTab(self.hpc_view, "OverallWiring")        
+        
         # Clustering Results
         self.cluster_view = pg.PlotWidget()
-        self._setup_pg_view(self.cluster_view, 'Clustering Results')
-        self.tab_widget.addTab(self.cluster_view, "Clustering Results")
+        self._setup_pg_view(self.cluster_view, 'EEA with I/O extenders')
+        self.tab_widget.addTab(self.cluster_view, "EEA with I/O extenders")
 
-        # HPC Wiring
-        self.hpc_view = pg.PlotWidget()
-        self._setup_pg_view(self.hpc_view, 'HPC Wiring')
-        self.tab_widget.addTab(self.hpc_view, "HPC Wiring")
+        
 
         layout.addWidget(self.tab_widget)
         return panel
@@ -544,19 +560,11 @@ class WiringHarnessOptimizer(QMainWindow):
         view.setTitle(title)
         view.showGrid(x=True, y=True)
         view.setAspectLocked(True, ratio=1.0)
+        view.addLegend()
 
     # ==== ROBUST PROCESSING FUNCTIONS ====
 
-    def process_all_steps(self):
-        """Robust function to process all steps sequentially."""
-        if not (self.chassis_file_path and self.io_file_path):
-            QMessageBox.warning(self, "Missing Files", "Please select both chassis and I/O files first.")
-            return
 
-        self.log("🚀 Starting complete processing pipeline...")
-        
-        # Step 1: Process Graph
-        self.process_graph()
 
     def process_graph(self):
         """Process and load the graph data."""
@@ -604,7 +612,7 @@ class WiringHarnessOptimizer(QMainWindow):
         self.worker.start()
 
     def run_hpc_analysis(self):
-        """Run HPC wiring analysis."""
+        """Run Overall wiring analysis."""
         if not self.current_graph:
             QMessageBox.warning(self, "No graph", "Load and process files first.")
             return
@@ -631,13 +639,10 @@ class WiringHarnessOptimizer(QMainWindow):
         num_chassis = stats.get("chassis_nodes", 0)
         num_io = stats.get("io_nodes", 0)
 
-        self.log(f"✅ Graph loaded: {num_chassis} chassis nodes, {num_io} I/O points")
+        self.log(f"Graph loaded: {num_chassis} chassis nodes, {num_io} I/O points")
         
-        if export_path:
-            self.log(f"📁 Enhanced graph exported: {os.path.basename(export_path)}")
-
         for w in validation.get("warnings", []):
-            self.log(f"⚠️ Warning: {w}")
+            self.log(f" Warning: {w}")
 
         # Update visualization
         self._visualize_graph(self.current_graph)
@@ -645,11 +650,9 @@ class WiringHarnessOptimizer(QMainWindow):
         # Enable next steps
         self.elbow_btn.setEnabled(True)
         self.hpc_btn.setEnabled(True)
-        self.btn_process_all.setEnabled(True)
+      
 
-        # Auto-continue if processing all
-        if hasattr(self, '_processing_all') and self._processing_all:
-            self.run_elbow_analysis()
+
 
     def on_elbow_completed(self, results):
         """Handle elbow analysis completion."""
@@ -662,33 +665,46 @@ class WiringHarnessOptimizer(QMainWindow):
         clamped_k = min(optimal_k, max_clusters)
         
         if clamped_k != optimal_k:
-            self.log(f"⚠️ Optimal k ({optimal_k}) exceeds max supported ({max_clusters}), using {clamped_k}")
+            self.log(f" Optimal k ({optimal_k}) exceeds max supported ({max_clusters}), using {clamped_k}")
         
         self.n_clusters_spin.setValue(clamped_k)
         self.clustering_btn.setEnabled(True)
 
         # Visualize elbow curve
         self._visualize_elbow_analysis()
-        self.log(f"📊 Elbow analysis completed. Optimal clusters: {optimal_k}")
+        #self.log(f" Elbow analysis completed. Optimal clusters: {optimal_k}")
 
-        # Auto-continue if processing all
-        if hasattr(self, '_processing_all') and self._processing_all:
-            self.run_clustering()
+
 
     def on_clustering_completed(self, results):
         """Handle clustering completion."""
         self.clustering_results = results
         self._finish_worker_task()
+        
+        if self.clustering_results:
+            price_per_m = self.cost_cfg.get("wire_price_per_m", 0.0)
+            currency = self.cost_cfg.get("currency", "")
 
-        total_length = results.get("total_wire_length", 0.0)
-        self.log(f"🎯 Clustering completed. Total wire length: {total_length:.2f} mm")
+            total_length = self.clustering_results.get("total_wire_length", 0.0)
+            self.clustering_total_label.setText(f"Clustering Wiring Length: {total_length:.2f} mm")
+            cost_without_can = (total_length / 1000.0) * price_per_m
+            self.clustering_cost_label.setText(f"Cost: {cost_without_can:.2f} {currency}")
 
-        # Visualize clustering results
+            total_with_can = self.clustering_results.get("overall_wiring_harness_length", 0.0)
+            self.clustering_with_can_label.setText(f"Total with CAN FD: {total_with_can:.2f} mm")
+            
+            can_price_per_m = self.cost_cfg.get("CAN_bus_price_per_m", price_per_m)
+            can_bus_length = total_with_can - total_length
+            
+            cost_with_can = ((total_length / 1000.0) * price_per_m) + ((can_bus_length / 1000.0) * can_price_per_m)
+            self.clustering_with_can_cost_label.setText(f"Cost: {cost_with_can:.2f} {currency}")
+
+        # Visualize clustering results and update comparison
         self._visualize_clustering_results()
+        if self.hpc_results:
+            self._compare_results()
 
-        # Auto-continue if processing all
-        if hasattr(self, '_processing_all') and self._processing_all:
-            self.run_hpc_analysis()
+
 
     def on_hpc_completed(self, results):
         """Handle HPC analysis completion."""
@@ -697,8 +713,12 @@ class WiringHarnessOptimizer(QMainWindow):
 
         if self.hpc_results:
             total_length = self.hpc_results.get("total_length", 0.0)
-            self.hpc_total_label.setText(f"HPC Total Length: {total_length:.2f} mm")
-            self.log(f"🔌 HPC analysis completed. Total length: {total_length:.2f} mm")
+            self.hpc_total_label.setText(f"Overall Wiring Length: {total_length:.2f} mm")
+
+            price_per_m = self.cost_cfg.get("wire_price_per_m", 0.0)
+            currency = self.cost_cfg.get("currency", "")
+            cost = (total_length / 1000.0) * price_per_m
+            self.hpc_cost_label.setText(f"Cost: {cost:.2f} {currency}")
             
             # Visualize HPC wiring
             self._visualize_hpc_wiring()
@@ -707,27 +727,24 @@ class WiringHarnessOptimizer(QMainWindow):
             if self.clustering_results:
                 self._compare_results()
         else:
-            self.log("❌ HPC analysis failed.")
+            self.log(" Overall wiring analysis failed.")
 
-        # Finish processing all
-        if hasattr(self, '_processing_all'):
-            self._processing_all = False
-            self.log("🎉 All processing steps completed!")
+
 
     def on_error(self, error_message: str):
         """Handle worker errors."""
         self._finish_worker_task()
-        self.log(f"❌ ERROR: {error_message}")
+        self.log(f" ERROR: {error_message}")
         QMessageBox.critical(self, "Error", f"An error occurred:\n{error_message}")
         
-        if hasattr(self, '_processing_all'):
-            self._processing_all = False
+    
 
     # ==== VISUALIZATION FUNCTIONS ====
 
     def _visualize_graph(self, graph):
-        """Visualize the enhanced graph."""
+        """Visualize the network graph."""
         self.graph_view.clear()
+        self.graph_view.addLegend().clear()
         pos = self._get_node_positions(graph)
         
         if not pos:
@@ -735,7 +752,7 @@ class WiringHarnessOptimizer(QMainWindow):
             return
 
         # Draw edges
-        self._draw_graph_edges(self.graph_view, graph, pos)
+        self._draw_graph_edges(self.graph_view, graph, pos, name="Chassis Edge")
         
         # Draw nodes
         self._draw_graph_nodes(self.graph_view, graph, pos)
@@ -779,18 +796,20 @@ class WiringHarnessOptimizer(QMainWindow):
             return
 
         self.cluster_view.clear()
+        self.cluster_view.addLegend().clear()
         
         pos = self._get_node_positions(self.current_graph)
         
         # 1. Draw base chassis graph (nodes and edges)
         chassis_nodes = [n for n, d in self.current_graph.nodes(data=True) if not d.get("is_io")]
         chassis_graph = self.current_graph.subgraph(chassis_nodes)
-        self._draw_graph_edges(self.cluster_view, chassis_graph, pos, alpha=0.2)
+        self._draw_graph_edges(self.cluster_view, chassis_graph, pos, alpha=0.2, name="Chassis Edge")
         self._draw_graph_nodes(self.cluster_view, chassis_graph, pos)
 
         # 2. Draw I/O nodes, paths, and centroids by cluster
         clusters = self.clustering_results.get("clusters", {})
         colors = self._get_cluster_colors()
+        legend_items_added = set()
 
         for i, (cluster_id, cluster_data) in enumerate(clusters.items()):
             color = colors[i % len(colors)]
@@ -800,7 +819,7 @@ class WiringHarnessOptimizer(QMainWindow):
             io_points = [pos[node] for node in io_nodes_in_cluster if node in pos]
             if io_points:
                 points = np.array(io_points)
-                style = self._get_node_style("IO_") 
+                style = self._get_node_style("", type_name_override="io")
                 self.cluster_view.addItem(
                     pg.ScatterPlotItem(
                         points[:, 0], points[:, 1],
@@ -814,6 +833,10 @@ class WiringHarnessOptimizer(QMainWindow):
             # Draw wiring paths for this cluster
             centroid_info = cluster_data.get("centroid")
             wiring_paths = cluster_data.get("wiring_paths", {})
+            
+            is_can_bus = cluster_id == "can_bus"
+            path_name = "CAN Bus Path" if is_can_bus else f"Cluster {i} Wiring"
+            
             for io_node, path_data in wiring_paths.items():
                 path = path_data.get("path", [])
                 if centroid_info and "pos" in centroid_info:
@@ -821,12 +844,18 @@ class WiringHarnessOptimizer(QMainWindow):
                     if len(vis_path_points) > 1:
                         xs = [p[0] for p in vis_path_points]
                         ys = [p[1] for p in vis_path_points]
+                        
+                        current_path_name = None
+                        if path_name not in legend_items_added:
+                            current_path_name = path_name
+                            legend_items_added.add(path_name)
+                        
                         self.cluster_view.addItem(
-                            pg.PlotCurveItem(xs, ys, pen=pg.mkPen(color, width=2.5, style=Qt.DashLine))
+                            pg.PlotCurveItem(xs, ys, pen=pg.mkPen(color, width=2.5, style=Qt.DashLine), name=current_path_name)
                         )
 
             # Draw I/O extender (centroid) node and its label
-            if centroid_info and "pos" in centroid_info:
+            if centroid_info and "pos" in centroid_info and not is_can_bus:
                 cx, cy = centroid_info["pos"]
                 self.cluster_view.addItem(
                     pg.ScatterPlotItem(
@@ -850,15 +879,17 @@ class WiringHarnessOptimizer(QMainWindow):
             return
 
         self.hpc_view.clear()
+        self.hpc_view.addLegend().clear()
         pos = self._get_node_positions(self.current_graph)
         
         # Draw base graph lightly
-        self._draw_graph_edges(self.hpc_view, self.current_graph, pos, alpha=0.2)
+        self._draw_graph_edges(self.hpc_view, self.current_graph, pos, alpha=0.2, name="Chassis Edge")
         self._draw_graph_nodes(self.hpc_view, self.current_graph, pos, alpha=0.3)
         
         # Draw HPC wiring paths
         hpc_node = self.hpc_results.get("hpc_node", "H1")
         paths = self.hpc_results.get("paths", {})
+        legend_item_added = False
         
         for io_node, path_data in paths.items():
             path = path_data.get("path", [])
@@ -870,9 +901,14 @@ class WiringHarnessOptimizer(QMainWindow):
                         ys.append(pos[node][1])
                 
                 if len(xs) > 1:
+                    name = None
+                    if not legend_item_added:
+                        name = "Direct HPC Wiring"
+                        legend_item_added = True
+                    
                     self.hpc_view.addItem(
                         pg.PlotCurveItem(
-                            xs, ys, pen=pg.mkPen('r', width=3, style=Qt.DashLine)
+                            xs, ys, pen=pg.mkPen('r', width=3, style=Qt.DashLine), name=name
                         )
                     )
 
@@ -895,7 +931,7 @@ class WiringHarnessOptimizer(QMainWindow):
                     continue
         return pos
 
-    def _draw_graph_edges(self, view, graph, pos, alpha=1.0):
+    def _draw_graph_edges(self, view, graph, pos, alpha=1.0, name=None):
         """Draw graph edges."""
         xs, ys = [], []
         for u, v in graph.edges():
@@ -909,57 +945,76 @@ class WiringHarnessOptimizer(QMainWindow):
             pen_color = (0, 0, 0, int(255 * alpha))
             view.addItem(
                 pg.PlotCurveItem(
-                    xs, ys, pen=pg.mkPen(pen_color, width=1), connect='finite'
+                    xs, ys, pen=pg.mkPen(pen_color, width=1), connect='finite', name=name
                 )
             )
 
-    def _get_node_style(self, node_name: str) -> Dict[str, Any]:
+    def _get_node_style(self, node_name: str, type_name_override: str = None) -> Dict[str, Any]:
         """Get node style from config based on prefix."""
         node_defs = self.config.get("node_definitions", {})
         node_types = node_defs.get("node_types", {})
         
-        for type_name, type_info in node_types.items():
-            for prefix in type_info.get("prefixes", []):
-                if node_name.startswith(prefix):
-                    # Convert hex color to pg.Color
-                    hex_color = type_info.get("color", "#9B9B9B").lstrip('#')
-                    rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                    return {
-                        "brush": pg.mkBrush(color=rgb),
-                        "pen": pg.mkPen(color=tuple(c*0.6 for c in rgb)),
-                        "size": type_info.get("size", 6),
-                        "symbol": type_info.get("symbol", "o")
-                    }
+        # Determine the type name to use
+        type_to_find = type_name_override
+        if not type_to_find:
+            for name, info in node_types.items():
+                for prefix in info.get("prefixes", []):
+                    if node_name.startswith(prefix):
+                        type_to_find = name
+                        break
+                if type_to_find:
+                    break
         
-        # Fallback to default style
-        default_style = node_defs.get("default_node", {})
-        hex_color = default_style.get("color", "#9B9B9B").lstrip('#')
+        type_info = node_types.get(type_to_find, node_defs.get("default_node", {}))
+
+        # Convert hex color to pg.Color
+        hex_color = type_info.get("color", "#9B9B9B").lstrip('#')
         rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
         return {
+            "name": type_info.get("description", "Unknown Node"),
             "brush": pg.mkBrush(color=rgb),
-            "pen": pg.mkPen(color=tuple(c*0.6 for c in rgb)),
-            "size": default_style.get("size", 6),
-            "symbol": default_style.get("symbol", "o")
+            "pen": pg.mkPen(color=tuple(c * 0.6 for c in rgb)),
+            "size": type_info.get("size", 6),
+            "symbol": type_info.get("symbol", "o")
         }
-
+        
     def _draw_graph_nodes(self, view, graph, pos, alpha=1.0):
         """Draw graph nodes based on config-driven styles."""
         
         # Group nodes by style for efficient plotting
         nodes_by_style = {}
+        node_types_in_graph = set()
+
         for node, data in graph.nodes(data=True):
             if node not in pos:
                 continue
             
-            style = self._get_node_style(node)
-            style_key = (style["symbol"], style["size"], style["brush"].color().name())
+            # Determine node type for styling and legend
+            node_type_name = "default"
+            node_defs = self.config.get("node_definitions", {}).get("node_types", {})
+
+            if data.get("is_io"):
+                node_type_name = "io"
+            else:
+                for type_name, type_info in node_defs.items():
+                    for prefix in type_info.get("prefixes", []):
+                        if node.startswith(prefix):
+                            node_type_name = type_name
+                            break
+                    if node_type_name != "default":
+                        break
+            
+            node_types_in_graph.add(node_type_name)
+            
+            style = self._get_node_style(node, type_name_override=node_type_name)
+            style_key = style["name"]
             
             if style_key not in nodes_by_style:
                 nodes_by_style[style_key] = {"style": style, "points": []}
             
             nodes_by_style[style_key]["points"].append(pos[node])
 
-        # Plot each group of nodes
+        # Plot each group of nodes and add to legend
         for style_key, group in nodes_by_style.items():
             points = np.array(group["points"])
             style = group["style"]
@@ -970,7 +1025,8 @@ class WiringHarnessOptimizer(QMainWindow):
                     size=style["size"],
                     symbol=style["symbol"],
                     brush=style["brush"],
-                    pen=style["pen"]
+                    pen=style["pen"],
+                    name=style["name"]
                 )
             )
 
@@ -1021,7 +1077,7 @@ class WiringHarnessOptimizer(QMainWindow):
         self.elbow_btn.setEnabled(False)
         self.clustering_btn.setEnabled(False)
         self.hpc_btn.setEnabled(False)
-        self.btn_process_all.setEnabled(False)
+    
 
     def _finish_worker_task(self):
         """Finish a worker task - hide progress and re-enable controls."""
@@ -1031,7 +1087,7 @@ class WiringHarnessOptimizer(QMainWindow):
         # Re-enable appropriate controls based on current state
         if self.chassis_file_path and self.io_file_path:
             self.btn_process.setEnabled(True)
-            self.btn_process_all.setEnabled(True)
+           
         
         if self.current_graph:
             self.elbow_btn.setEnabled(True)
@@ -1039,19 +1095,25 @@ class WiringHarnessOptimizer(QMainWindow):
             self.hpc_btn.setEnabled(True)
 
     def _compare_results(self):
-        """Compare clustering vs HPC results."""
+        """Compare clustering (with and without CAN) vs HPC results."""
         if not (self.clustering_results and self.hpc_results):
             return
-        
-        cluster_length = self.clustering_results.get("total_wire_length", 0.0)
+
+        cluster_length_without_can = self.clustering_results.get("total_wire_length", 0.0)
+        cluster_length_with_can = self.clustering_results.get("overall_wiring_harness_length", 0.0)
         hpc_length = self.hpc_results.get("total_length", 0.0)
-        
+
         if hpc_length > 0:
-            improvement = ((hpc_length - cluster_length) / hpc_length) * 100
-            self.log(f"📊 Comparison: Clustering vs HPC")
-            self.log(f"   Clustering: {cluster_length:.2f} mm")
-            self.log(f"   HPC Direct: {hpc_length:.2f} mm")
-            self.log(f"   Improvement: {improvement:.1f}%")
+            self.log(f" Comparison: EEA with I/O Extenders vs. Overall  Wiring")
+            self.log(f"   Overall Wiring: {hpc_length:.2f} mm")
+
+            if cluster_length_without_can > 0:
+                improvement_without_can = ((hpc_length - cluster_length_without_can) / hpc_length) * 100
+                self.log(f"   Zonal EEA (without BUS): {cluster_length_without_can:.2f} mm -> Improvement: {improvement_without_can:.1f}%")
+
+            if cluster_length_with_can > 0:
+                improvement_with_can = ((hpc_length - cluster_length_with_can) / hpc_length) * 100
+                self.log(f"   Zonal EEA (with BUS): {cluster_length_with_can:.2f} mm -> Improvement: {improvement_with_can:.1f}%")
 
     # ==== FILE OPERATIONS ====
 
@@ -1065,7 +1127,7 @@ class WiringHarnessOptimizer(QMainWindow):
             self.chassis_file_path = file_path
             self.chassis_file_label.setText(f"Chassis: {os.path.basename(file_path)}")
             self._check_files_loaded()
-            self.log(f"📁 Loaded chassis: {os.path.basename(file_path)}")
+            self.log(f" Loaded chassis: {os.path.basename(file_path)}")
 
     def load_io_file(self):
         """Load I/O file."""
@@ -1077,7 +1139,7 @@ class WiringHarnessOptimizer(QMainWindow):
             self.io_file_path = file_path
             self.io_file_label.setText(f"I/O: {os.path.basename(file_path)}")
             self._check_files_loaded()
-            self.log(f"📁 Loaded I/O: {os.path.basename(file_path)}")
+            self.log(f" Loaded I/O: {os.path.basename(file_path)}")
 
     def load_default_files(self):
         """Load default files from configuration."""
@@ -1088,16 +1150,16 @@ class WiringHarnessOptimizer(QMainWindow):
         if default_chassis and os.path.exists(default_chassis):
             self.chassis_file_path = default_chassis
             self.chassis_file_label.setText(f"Chassis: {os.path.basename(default_chassis)}")
-            self.log(f"📁 Loaded default chassis: {os.path.basename(default_chassis)}")
+            self.log(f" Loaded default chassis: {os.path.basename(default_chassis)}")
         else:
-            self.log(f"⚠️ Default chassis file not found: {default_chassis}")
+            self.log(f" Default chassis file not found: {default_chassis}")
 
         if default_io and os.path.exists(default_io):
             self.io_file_path = default_io
             self.io_file_label.setText(f"I/O: {os.path.basename(default_io)}")
-            self.log(f"📁 Loaded default I/O: {os.path.basename(default_io)}")
+            self.log(f" Loaded default I/O: {os.path.basename(default_io)}")
         else:
-            self.log(f"⚠️ Default I/O file not found: {default_io}")
+            self.log(f" Default I/O file not found: {default_io}")
 
         self._check_files_loaded()
 
@@ -1105,8 +1167,7 @@ class WiringHarnessOptimizer(QMainWindow):
         """Check if both files are loaded and enable processing."""
         both_loaded = bool(self.chassis_file_path and self.io_file_path)
         self.btn_process.setEnabled(both_loaded)
-        if both_loaded:
-            self.btn_process_all.setEnabled(True)
+        
 
     def export_results_json(self):
         """Export results to JSON."""
@@ -1137,11 +1198,11 @@ class WiringHarnessOptimizer(QMainWindow):
                 with open(file_path, 'w', encoding="utf-8") as f:
                     json.dump(results, f, indent=2)
                 
-                self.log(f"💾 Results exported: {os.path.basename(file_path)}")
+                self.log(f" Results exported: {os.path.basename(file_path)}")
                 QMessageBox.information(self, "Export Complete", f"Results exported to:\n{file_path}")
             except Exception as e:
                 error_msg = f"Failed to export results: {e}"
-                self.log(f"❌ {error_msg}")
+                self.log(f" {error_msg}")
                 QMessageBox.critical(self, "Export Error", error_msg)
 
     def export_report_pdf(self):
@@ -1182,12 +1243,12 @@ class WiringHarnessOptimizer(QMainWindow):
                 self._add_hpc_section(story, styles)
 
             doc.build(story)
-            self.log(f"📄 PDF report exported: {os.path.basename(file_path)}")
+            self.log(f" PDF report exported: {os.path.basename(file_path)}")
             QMessageBox.information(self, "Export Complete", f"Report exported to:\n{file_path}")
             
         except Exception as e:
             error_msg = f"Failed to export PDF: {e}"
-            self.log(f"❌ {error_msg}")
+            self.log(f" {error_msg}")
             QMessageBox.critical(self, "Export Error", error_msg)
 
     def _add_graph_section(self, story, styles):

@@ -1,6 +1,23 @@
 """
-Clustering & Dijkstra - Integrated Centroid Optimization
+Clustering & finding shortest path with Dijkstra
 ========================================================
+
+This module provides the `ClusteringDijkstra` class, which is responsible for
+grouping I/O nodes into clusters and finding the optimal placement for I/O
+extenders (centroids) within a chassis graph. It also includes functionality
+to calculate a CAN bus path connecting these extenders to a High-Performance
+Computer (HPC).
+
+The process involves these main steps:
+1.  Clustering: I/O nodes are clustered based on their graph distance
+    from each other.
+2.  Centroid Optimization: For each cluster, the optimal location for an
+    I/O extender is found by evaluating candidate points on chassis nodes and
+    edges, The threshold value can be set in configuration file.
+3.  CAN Bus Calculation: A shortest path is calculated to connect the HPC
+    to all newly placed I/O extenders in a bus topology.
+4.  Output Generation: The results, including cluster data, wiring paths,
+    and the CAN bus path, are compiled and exported to a JSON file.
 """
 
 from typing import Dict, Any, List, Tuple, Optional
@@ -17,205 +34,287 @@ import io
 from functools import wraps
 
 
+_active_profiler = None
 
-_active_profiler = None  # Global tracker to prevent overlaps
 
 def profile_function(func):
+    """
+    A decorator to profile a function's execution time and memory usage.
+
+    Profiling is enabled by setting the environment variable ENABLE_PROFILING=true.
+    Results are saved to the './profiling/functions' directory.
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
         global _active_profiler
-        
-        # Check if profiling is enabled
         if os.getenv('ENABLE_PROFILING', 'false').lower() != 'true':
             return func(*args, **kwargs)
-
-        # Skip if another profiler is already active
         if _active_profiler is not None:
-            print(f"⚠️  Skipping profiling for {func.__name__} (profiler already active)")
+            #print(f"  Skipping profiling for {func.__name__} (profiler already active)")
             return func(*args, **kwargs)
-
-        # Start new profiler
         profiler = cProfile.Profile()
         _active_profiler = profiler
         start_time = datetime.now()
-        
         try:
             profiler.enable()
-            result = func(*args, **kwargs)
-            return result
+            return func(*args, **kwargs)
         finally:
-            # Always clean up, even if function throws exception
             profiler.disable()
-            _active_profiler = None  # Reset global tracker
-            
-            # Save profiling results
+            _active_profiler = None
             end_time = datetime.now()
             elapsed = (end_time - start_time).total_seconds()
             timestamp = end_time.strftime('%Y%m%d_%H%M%S')
-            
-            # Create profiling directory
             profile_dir = './profiling/functions'
             os.makedirs(profile_dir, exist_ok=True)
-            
-            # Save files
             base_name = f'{func.__module__}.{func.__name__}_{timestamp}'
             prof_path = os.path.join(profile_dir, base_name + '.prof')
             profiler.dump_stats(prof_path)
-            
-            # Create readable report
             s = io.StringIO()
             ps = pstats.Stats(profiler, stream=s)
-            ps.strip_dirs()
-            ps.sort_stats('cumtime')
-            ps.print_stats(20)
-            
+            ps.strip_dirs().sort_stats('cumtime').print_stats(20)
             txt_path = os.path.join(profile_dir, base_name + '.txt')
             with open(txt_path, 'w') as f:
                 f.write(s.getvalue())
-            
-            # Log results
             if elapsed > 0.1:
-                print(f'⚡ Profiled {func.__name__} took {elapsed:.2f}s -> {txt_path}')
-    
+                print(f' Profiled {func.__name__} took {elapsed:.2f}s -> {txt_path}')
     return wrapper
 
 
 class ClusteringDijkstra:
+    """
+    Orchestrates the clustering of I/O nodes and optimization of extender placements.
+    """
     @profile_function
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        Initializes the ClusteringDijkstra instance.
+
+        Args:
+            config: A dictionary containing the application's configuration,
+                    typically loaded from a YAML file.
+        """
         self.config = config or {}
         self.logger = logging.getLogger(__name__)
+
+        # Configure paths for exporting results.
         paths_cfg = self.config.get("paths", {})
         self.export_dir = paths_cfg.get("export_dir", "./export")
         os.makedirs(self.export_dir, exist_ok=True)
+
+        # Load clustering-specific parameters.
         self.clustering_config = self.config.get("clustering", {})
         self.edge_sample_step = float(self.clustering_config.get("edge_sample_step", 0.25))
         self.include_node_candidates = bool(self.clustering_config.get("include_node_candidates", True))
+
+        # Load node definitions to dynamically identify HPC and extender nodes.
+        node_cfg = self.config.get("node_definitions", {})
+        self.node_types = node_cfg.get("node_types", {})
+
+        # Determine the HPC node name from configuration for flexible hardware setups.
+        hpc_type = next((t for t, d in self.node_types.items() if d.get("is_hpc")), "hpc")
+        self.hpc_prefixes = self.node_types.get(hpc_type, {}).get("prefixes", ["HPC_", "H_"])
+        self.configured_hpc_name = self.config.get("node_configuration", {}).get("hpc_node_name")
+
+        # Get prefixes for I/O extenders to support custom naming schemes.
+        extender_type = next((t for t, d in self.node_types.items() if d.get("is_extender")), "extender")
+        self.extender_prefixes = self.node_types.get(extender_type, {}).get("prefixes", ["EXT_"])
+
+    def _find_hpc_node(self, graph: nx.Graph) -> Optional[str]:
+        """
+        Determines the HPC node name by checking configuration and then scanning the graph.
+
+        This robust method ensures that the HPC node can be found even if not
+        explicitly named in the config, adapting to the actual graph data.
+
+        Args:
+            graph: The graph to search for the HPC node.
+
+        Returns:
+            The name of the HPC node if found, otherwise None.
+        """
+        # Priority 1: Use the explicitly configured HPC node name if it exists in the graph.
+        if self.configured_hpc_name and self.configured_hpc_name in graph:
+            return self.configured_hpc_name
+
+        # Priority 2: If not configured or not found, scan the graph for nodes matching HPC prefixes.
+        hpc_candidates = [n for n in graph.nodes() if any(n.startswith(p) for p in self.hpc_prefixes)]
+
+        if len(hpc_candidates) == 1:
+            self.logger.info(f"HPC not configured, but found unique candidate '{hpc_candidates[0]}'. Using it.")
+            return hpc_candidates[0]
+        
+        if len(hpc_candidates) > 1:
+            self.logger.warning(f"Found multiple possible HPCs: {hpc_candidates}. Using the first one: '{hpc_candidates[0]}'. Please specify 'hpc_node_name' in config for clarity.")
+            return hpc_candidates[0]
+
+        # If no candidates are found by any method, log an error.
+        self.logger.error("HPC could not be found in the graph. Please check graph data or 'hpc_node_name' in config.")
+        return None
     
     @profile_function
     def cluster_and_optimize(self, graph: nx.Graph, n_clusters: int) -> Dict[str, Any]:
+        """
+        Executes the full clustering and optimization workflow.
+
+        Args:
+            graph: The input graph containing chassis and I/O nodes.
+            n_clusters: The desired number of clusters to create.
+
+        Returns:
+            A dictionary containing the complete results, including cluster
+            definitions, wiring paths, total wire length, and CAN bus data.
+        """
+        # Step 1: Identify all I/O nodes in the graph.
         io_nodes = [n for n, d in graph.nodes(data=True) if d.get("is_io", False)]
         if not io_nodes:
+            self.logger.warning("No I/O nodes found in the graph. Aborting.")
             return {"clusters": {}, "total_wire_length": 0.0, "output_path": None}
 
-        k = min(n_clusters, len(io_nodes))
+        # Step 2: Prepare the graph and data for clustering.
+        k = min(n_clusters, len(io_nodes))  # Ensure user don't ask for more clusters than there are nodes.
         chassis = self._get_chassis_subgraph(graph)
         pos = {n: chassis.nodes[n]["pos"] for n in chassis.nodes()}
         io_attachment_map = self._infer_attachment_nodes(graph, io_nodes)
-        
+
+        # Step 3: Group I/O nodes into clusters.
         labels = self._cluster_by_graph_distance(chassis, io_nodes, io_attachment_map, k)
         clusters = {f"cluster_{i}": {"io_nodes": []} for i in range(k)}
         for i, node in enumerate(io_nodes):
             clusters[f"cluster_{labels[i]}"]["io_nodes"].append(node)
 
+        # Step 4: For each cluster, find the optimal extender location and calculate wire lengths.
         total_wire_length = 0.0
         all_pairs_lengths = dict(nx.all_pairs_dijkstra_path_length(chassis, weight="weight"))
-
         for cid, cdata in clusters.items():
             cluster_length = self._process_single_cluster(graph, chassis, pos, cid, cdata, all_pairs_lengths)
             total_wire_length += cluster_length
 
+        # Step 5: Format and export the final results.
         return self._format_and_export_output(graph, clusters, total_wire_length)
 
+    # --- Helper Methods for Graph Preparation ---
 
     def _get_chassis_subgraph(self, graph: nx.Graph) -> nx.Graph:
+        """Extracts the chassis subgraph (nodes that are not I/O)."""
         return graph.subgraph([n for n, d in graph.nodes(data=True) if not d.get("is_io", False)]).copy()
 
     def _infer_attachment_nodes(self, graph: nx.Graph, io_nodes: List[str]) -> Dict[str, str]:
+        """Infers the chassis node to which each I/O node is attached."""
         return {io: list(graph.neighbors(io))[0] for io in io_nodes if list(graph.neighbors(io))}
 
-    
     @profile_function
-    def _cluster_by_graph_distance(self, chassis: nx.Graph, io_nodes: List[str], 
+    def _cluster_by_graph_distance(self, chassis: nx.Graph, io_nodes: List[str],
                                    io_attachment_map: Dict[str, str], k: int) -> np.ndarray:
+        """
+        Clusters I/O nodes based on their shortest path distances within the chassis graph.
+        """
+        # Create a distance matrix based on the shortest path length between each pair of I/O attachment nodes.
         attachment_nodes = [io_attachment_map[io] for io in io_nodes]
         all_lengths = dict(nx.all_pairs_dijkstra_path_length(chassis, weight="weight"))
         dist_matrix = np.array([[all_lengths.get(u, {}).get(v, float('inf')) for v in attachment_nodes] for u in attachment_nodes])
-        
+
+        # If the graph is disconnected, some distances will be infinity. Replace them with a large value.
         if np.isinf(dist_matrix).any():
             max_dist = np.max(dist_matrix[np.isfinite(dist_matrix)]) if np.isfinite(dist_matrix).any() else 1.0
             dist_matrix[np.isinf(dist_matrix)] = max_dist * 10
 
+        # Use Agglomerative Clustering with the precomputed distance matrix.
         clusterer = AgglomerativeClustering(n_clusters=k, metric='precomputed', linkage='complete')
         return clusterer.fit_predict(dist_matrix)
 
-    
     @profile_function
     def _process_single_cluster(self, graph: nx.Graph, chassis: nx.Graph,
                               pos: Dict[str, Tuple[float, float]],
-                              cid: str, cdata: Dict[str, Any], 
+                              cid: str, cdata: Dict[str, Any],
                               all_pairs_lengths: Dict[Any, Any]) -> float:
+        """
+        Finds the optimal centroid for a single cluster and calculates wiring paths.
+        """
         io_nodes = cdata["io_nodes"]
         if not io_nodes: return 0.0
 
+        # Identify the chassis nodes connected to the I/O nodes in this cluster.
         attachment_nodes = self._infer_attachment_nodes(graph, io_nodes)
         attachment_nodes_in_cluster = [attachment_nodes[ion] for ion in io_nodes]
-        
+
+        # Generate all possible locations for the I/O extender (centroid).
         candidates = self._generate_candidates(chassis, pos)
-        
+
+        # Find the candidate that results in the shortest total wire length for the cluster.
         best_cost = float('inf')
         best_candidate = None
         for cand in candidates:
             cost = self._evaluate_candidate_cost(chassis, cand, attachment_nodes_in_cluster, all_pairs_lengths)
             if cost < best_cost:
                 best_cost, best_candidate = cost, cand
-        
+
+        # Store the best found centroid and its associated cost.
         cdata["centroid"] = best_candidate
         cdata["cluster_wire_length"] = best_cost
-        
+
+        # Calculate the individual wiring paths from the optimal centroid to each I/O node.
         wiring_paths = {}
         if best_candidate:
             for io_node in io_nodes:
                 attach_node = attachment_nodes[io_node]
                 path, length = self._get_path_and_length_from_centroid(chassis, best_candidate, attach_node)
-                # Append the I/O node to the path to make a complete path for visualization
-                full_path = path + [io_node]
+                full_path = path + [io_node]  # Append the I/O node itself to complete the path.
                 wiring_paths[io_node] = {"path": full_path, "length": length}
         cdata["wiring_paths"] = wiring_paths
         
         return best_cost
 
-    
-    
     @profile_function
-    def _generate_candidates(self, chassis, pos):
+    def _generate_candidates(self, chassis: nx.Graph, pos: Dict[str, Tuple[float, float]]) -> List[Dict[str, Any]]:
+        """
+        Generates candidate locations for centroids, including chassis nodes and points along edges.
+        """
         candidates = []
+        # Option 1: Consider every node in the chassis as a potential centroid location.
         if self.include_node_candidates:
             for n in chassis.nodes():
                 candidates.append({"type": "node", "node": n, "pos": pos[n]})
         
+        # Option 2: Consider points along each edge of the chassis as potential locations.
         t_values = np.arange(0, 1 + self.edge_sample_step, self.edge_sample_step)
         for u, v in chassis.edges():
             p_u, p_v = np.array(pos[u]), np.array(pos[v])
             for t in t_values:
-                if t > 1e-6 and t < 1 - 1e-6:
+                if 1e-6 < t < 1 - 1e-6:  # Exclude the exact endpoints to avoid duplicates with node candidates.
+                    # Interpolate to find the position of the candidate point.
                     p = (1 - t) * p_u + t * p_v
                     candidates.append({"type": "edge", "u": u, "v": v, "t": t, "pos": tuple(p)})
         return candidates
 
-    
-    
-    
     @profile_function
-    def _evaluate_candidate_cost(self, chassis, candidate, attachment_nodes_in_cluster, all_pairs_lengths):
+    def _evaluate_candidate_cost(self, chassis: nx.Graph, candidate: Dict[str, Any],
+                                 attachment_nodes_in_cluster: List[str],
+                                 all_pairs_lengths: Dict) -> float:
+        """
+        Calculates the total wiring cost from a single candidate centroid to all nodes in a cluster.
+        """
         total_cost = 0.0
+        # Case 1: The candidate is located directly on a chassis node.
         if candidate["type"] == "node":
             for attach_node in attachment_nodes_in_cluster:
                 total_cost += all_pairs_lengths.get(candidate["node"], {}).get(attach_node, float('inf'))
+        # Case 2: The candidate is located on an edge between two nodes.
         elif candidate["type"] == "edge":
             u, v, t = candidate["u"], candidate["v"], candidate["t"]
             edge_len = chassis[u][v].get("weight", 1.0)
             for attach_node in attachment_nodes_in_cluster:
-                cost = min(all_pairs_lengths.get(u, {}).get(attach_node, float('inf')) + t * edge_len, 
-                           all_pairs_lengths.get(v, {}).get(attach_node, float('inf')) + (1 - t) * edge_len)
-                total_cost += cost
+                # The path to the attachment node can go via either end of the edge.
+                cost_u = all_pairs_lengths.get(u, {}).get(attach_node, float('inf')) + t * edge_len
+                cost_v = all_pairs_lengths.get(v, {}).get(attach_node, float('inf')) + (1 - t) * edge_len
+                total_cost += min(cost_u, cost_v)
         return total_cost
 
-    
-    
-    
     @profile_function
-    def _get_path_and_length_from_centroid(self, chassis, centroid, target_node):
+    def _get_path_and_length_from_centroid(self, chassis: nx.Graph, centroid: Dict[str, Any],
+                                           target_node: str) -> Tuple[List[str], float]:
+        """
+        Calculates the shortest path and length from a centroid candidate to a target node.
+        """
         if centroid["type"] == "node":
             source_node = centroid["node"]
             length = nx.dijkstra_path_length(chassis, source=source_node, target=target_node, weight="weight")
@@ -227,49 +326,135 @@ class ClusteringDijkstra:
             len_u = nx.dijkstra_path_length(chassis, source=u, target=target_node, weight="weight")
             len_v = nx.dijkstra_path_length(chassis, source=v, target=target_node, weight="weight")
             if len_u + t * edge_len < len_v + (1 - t) * edge_len:
-                return nx.dijkstra_path(chassis, source=u, target=target_node, weight="weight"), len_u + t * edge_len
+                path = nx.dijkstra_path(chassis, source=u, target=target_node, weight="weight")
+                return path, len_u + t * edge_len
             else:
-                return nx.dijkstra_path(chassis, source=v, target=target_node, weight="weight"), len_v + (1 - t) * edge_len
+                path = nx.dijkstra_path(chassis, source=v, target=target_node, weight="weight")
+                return path, len_v + (1 - t) * edge_len
         return [], float('inf')
 
+    @profile_function
+    def _calculate_can_bus_path(self, graph: nx.Graph, hpc_node: str, extender_nodes: List[str]) -> Dict[str, Any]:
+        """
+        Calculates the shortest CAN bus path connecting the HPC to all I/O extenders.
+        This uses a greedy approach (nearest neighbor), finding the next closest
+        extender from the last point in the path.
+        """
+        if not hpc_node or hpc_node not in graph:
+            self.logger.warning(f"HPC  '{hpc_node}' not found for CAN bus calculation.")
+            return {"path": [], "total_length": 0.0}
+        if not extender_nodes:
+            return {"path": [], "total_length": 0.0}
+
+        # Define which nodes are part of the bus network (chassis, extenders, and HPC).
+        def is_bus_node(node, data):
+            is_chassis = not any(node.startswith(p) for p in self.extender_prefixes) and \
+                         not any(node.startswith(p) for p in self.hpc_prefixes) and \
+                         not data.get("is_io")
+            return is_chassis or node in extender_nodes or node == hpc_node
+        bus_nodes = [n for n, d in graph.nodes(data=True) if is_bus_node(n, d)]
+        bus_graph = graph.subgraph(bus_nodes).copy()
+
+        # Iteratively find the nearest extender and add it to the bus.
+        remaining_extenders = set(extender_nodes)
+        can_bus_path = [hpc_node]
+        total_can_length = 0.0
+        current_node = hpc_node
+        while remaining_extenders:
+            shortest_dist = float('inf')
+            best_path = []
+            next_extender = None
+
+            # Find the closest extender from the current end of the bus.
+            for extender in remaining_extenders:
+                try:
+                    length, path = nx.single_source_dijkstra(bus_graph, source=current_node, target=extender, weight="weight")
+                    if length < shortest_dist:
+                        shortest_dist, best_path, next_extender = length, path, extender
+                except nx.NetworkXNoPath:
+                    continue
+            
+            # If a path is found, add it to our main CAN bus path.
+            if next_extender:
+                can_bus_path.extend(best_path[1:])  # Exclude the first node to avoid duplicates.
+                total_can_length += shortest_dist
+                current_node = next_extender
+                remaining_extenders.remove(next_extender)
+            else:
+                # This case occurs if some extenders are on disconnected parts of the graph.
+                self.logger.error("Could not find a path to all I/O extenders for CAN bus.")
+                break
+        
+        return {"path": can_bus_path, "total_length": total_can_length}
+
     def _format_and_export_output(self, original_graph: nx.Graph, clusters: Dict[str, Any], total_wire_length: float) -> Dict[str, Any]:
+        """
+        Formats the final results, calculates the CAN bus path, and exports to JSON.
+        """
         G_out = original_graph.copy()
+        
+        # Find the HPC node before proceeding.
+        hpc_node_name = self._find_hpc_node(G_out)
+        if not hpc_node_name:
+            # Error is logged within the find method. Return an error state.
+            return {"clusters": {}, "total_wire_length": 0.0, "output_path": None, "error": "HPC node not found"}
+
+        # Create and connect I/O extender nodes in the output graph.
         for cluster_id, cluster_data in clusters.items():
             centroid = cluster_data.get("centroid")
             if not centroid: continue
-            extender_id = f"EXT_{cluster_id.split('_')[-1]}"
+            
+            extender_prefix = self.extender_prefixes[0] if self.extender_prefixes else "EXT_"
+            extender_id = f"{extender_prefix}{cluster_id.split('_')[-1]}"
             G_out.add_node(extender_id, pos=centroid["pos"], type="extender", is_io=False)
+
+            # Connect the new extender node to the chassis graph to make it routable.
+            if centroid["type"] == "node":
+                G_out.add_edge(extender_id, centroid["node"], weight=0)
+            elif centroid["type"] == "edge":
+                u, v, t = centroid["u"], centroid["v"], centroid["t"]
+                edge_len = original_graph.edges[u, v].get("weight", 1.0)
+                G_out.add_edge(extender_id, u, weight=t * edge_len)
+                G_out.add_edge(extender_id, v, weight=(1 - t) * edge_len)
+
+            # Add edges representing the optimized wiring from the extender to its I/O nodes.
             for io_node, path_data in cluster_data.get("wiring_paths", {}).items():
                 G_out.add_edge(extender_id, io_node, weight=path_data.get("length", 0.0), edge_type="optimized_wire")
         
-        # Format G_out into the desired dictionary structure
-        nodes = list(G_out.nodes())
-        coordinates = {n: d.get("pos") for n, d in G_out.nodes(data=True) if "pos" in d}
-        
-        edges_dict = {}
-        for u, v, d in G_out.edges(data=True):
-            weight = d.get("weight", 1.0)
-            if u not in edges_dict:
-                edges_dict[u] = []
-            if v not in edges_dict:
-                edges_dict[v] = []
-            edges_dict[u].append([v, weight])
-            edges_dict[v].append([u, weight])
+        # Now that extenders are in the graph, calculate the CAN bus path.
+        extender_nodes = [n for n in G_out.nodes() if any(n.startswith(p) for p in self.extender_prefixes)]
+        can_bus_results = self._calculate_can_bus_path(G_out, hpc_node_name, extender_nodes)
 
+        # For visualization purposes, format the CAN bus path as a pseudo-cluster.
+        if can_bus_results and can_bus_results["path"] and hpc_node_name in G_out:
+            can_path = can_bus_results["path"]
+            if len(can_path) > 1:
+                clusters["can_bus"] = {
+                    "io_nodes": [],
+                    "centroid": {"type": "node", "node": hpc_node_name, "pos": G_out.nodes[hpc_node_name].get("pos")},
+                    "wiring_paths": {"can_bus_path": {"path": can_path[1:], "length": can_bus_results["total_length"]}},
+                    "cluster_wire_length": can_bus_results["total_length"]
+                }
+
+        # Compile all data into the final output dictionary.
+        can_bus_length = can_bus_results.get("total_length", 0.0)
+        overall_wiring_harness_length = total_wire_length + can_bus_length
         output_data = {
-            "nodes": nodes,
-            "coordinates": coordinates,
-            "edges": edges_dict,
+            "nodes": list(G_out.nodes()),
+            "coordinates": {n: d.get("pos") for n, d in G_out.nodes(data=True) if "pos" in d},
+            "edges": {u: [[v, d.get("weight", 1.0)] for _, v, d in G_out.edges(u, data=True)] for u in G_out.nodes()},
             "clusters": clusters,
-            "total_wire_length": total_wire_length
-            
+            "total_wire_length": total_wire_length,
+            "can_bus": can_bus_results,
+            "overall_wiring_harness_length": overall_wiring_harness_length,
         }
         
-        filename = f"clustered_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save the output to a timestamped JSON file.
+        filename = f"Zonal_EEA{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         output_path = os.path.join(self.export_dir, filename)
         with open(output_path, "w") as f:
             json.dump(output_data, f, indent=2)
-        self.logger.info(f"Successfully exported clustered graph to {output_path}")
+        
         
         output_data["output_path"] = output_path
         return output_data

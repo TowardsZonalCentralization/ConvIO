@@ -1,8 +1,6 @@
-# Automotive Wiring Harness Optimizer - Configuration File
-
+# CONVIO - Configuration File
 # All settings are read at application start. Restart required to apply changes.
 
-# For parameter sweep/batch runs, copy/modify this file as needed.
 
 # --------------------------
 # Paths and File Handling
@@ -11,12 +9,11 @@
 paths:
   data_dir: "./data" # Default location for chassis/IO input data
   export_dir: "./export" # Where to save output/results/reports
-  default_chassis_json: "./data/json.json"
-  default_io_csv: "./data/cluster_data_positive.csv"
+  default_chassis_json: "./data/truck.json"
+  default_io_csv: "./data/exemplary_IO_coordinates.csv"
   log_dir: "./logs"
   log_file: "./logs/optimizer.log"
   config_file: "./config.yaml"
-  batch_job_dir: "./batch_jobs" # For batch mode support
   allow_file_overwrite: false # Disallow accidental overwrite of existing exports
 
 # --------------------------
@@ -31,14 +28,9 @@ graph_loader:
   max_projection_nodes_per_io: 2 # Limit splits per IO for very large graphs
   input_coordinate_units: "mm" # Future: change to "inches" if needed
   skip_self_loops: true
-  batch_mode: false # Set true to batch load all .json/.csv from data_dir
+ 
 
-# --------------------------
-# Node Configuration
-# --------------------------
 
-node_configuration:
-  hpc_node_name: "H1" # Identifier for the High-Performance Computer node
   
 # --------------------------
 # Elbow Method
@@ -83,10 +75,9 @@ clustering:
 # --------------------------
 
 cost:
-  currency: "USD"
-  wire_price_per_m: 0.0
-  connector_price_each: 0.0
-  labor_price_per_m: 0.0
+  currency: "EURO"
+  wire_price_per_m: 1.5
+  CAN_bus_price_per_m: 1.7
   
 # --------------------------
 # GUI and Visualization
@@ -151,16 +142,6 @@ error_handling:
   batch_mode_continue_on_error: false
   fail_quietly_on_bad_files: false
 
-# --------------------------
-# Advanced / Future Proofing
-# --------------------------
-
-advanced:
-  enable_plugin_algorithms: false # Future: allow external plugins
-  auto_save_config_on_exit: false
-  config_version: "1.2.0" # Updated version for assembly node support
-  pre_processing_hooks: [] # Future: user-defined hooks
-  post_processing_hooks: []
 
 # --------------------------
 # Profiling
@@ -195,25 +176,7 @@ reproducibility:
   sklearn_seed: 42
   deterministic_graph_ops: false # Keep false unless you need strict determinism
 
-# --------------------------
-# Batch / Headless
-# --------------------------
 
-batch:
-  enabled: false
-  jobs_dir: "./batch_jobs"
-  stop_on_first_error: false
-  parallel_jobs: 1
-
-# --------------------------
-# Telemetry (opt-in, disabled by default)
-# --------------------------
-
-telemetry:
-  enabled: false
-  endpoint: "" # If enabled, document exactly what is captured
-  include_timing: false
-  include_env_info: false
   
 # Node Type Definitions - Keep it Simple!
 #SYMBOL_MAP supported by pyqtgraph = 
@@ -227,7 +190,12 @@ telemetry:
     #"star": "star",  
     #"hexagon": "h",   
 
+# --------------------------
+# Node Configuration
+# --------------------------
 
+node_configuration:
+  hpc_node_name: "H1" # Identifier for the High-Performance Computer node
 
 node_definitions:
   # Node type mapping based on prefixes
@@ -236,7 +204,7 @@ node_definitions:
       prefixes: ["J"]
       description: "Chassis junction points"
       color: "#4A90E2"  # Blue
-      size: 8
+      size: 10
       symbol: "o"
       
     hpc:
@@ -246,11 +214,11 @@ node_definitions:
       size: 16
       symbol: "d"
       
-    io:  # Fixed: was "I/O" (invalid YAML key)
+    io:  
       prefixes: ["I"]
       description: "Input/Output nodes"
       color: "#F5A623"  # Orange
-      size: 12
+      size: 5
       symbol: "o"
       
     sensor:
