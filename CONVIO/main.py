@@ -38,17 +38,13 @@ from PyQt5.QtWidgets import (
     QSplitter, QGroupBox, QGridLayout, QAction, QFormLayout, QDoubleSpinBox, QComboBox,
     QScrollArea, QCheckBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QBuffer, QIODevice
+from PyQt5.QtGui import QFont, QPixmap
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak)
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
-
 # Import custom modules
+from modules.report_generator import ReportGenerator
 from modules.graph_loader import create_graph_loader_from_config
 from modules.elbow_method import ElbowMethodAnalyzer
 from modules.clustering_dijkstra import ClusteringDijkstra
@@ -186,8 +182,8 @@ class OptimizationWorker(QThread):
             self.progress_updated.emit(90)
             
             # Stats and validation
-            stats = self._get_graph_statistics(network_graph)
-            validation = self._validate_graph(network_graph)
+            stats = WiringHarnessOptimizer._get_graph_statistics(network_graph)
+            validation = WiringHarnessOptimizer._validate_graph(network_graph)
             self.progress_updated.emit(100)
             
             self.status_updated.emit("Graph loading completed!")
@@ -254,30 +250,6 @@ class OptimizationWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(f"Overall wiring calculation failed: {e}")
 
-    def _get_graph_statistics(self, graph):
-        """Get basic graph statistics."""
-        io_nodes = [n for n, d in graph.nodes(data=True) if d.get("is_io", False)]
-        chassis_nodes = [n for n, d in graph.nodes(data=True) if not d.get("is_io", False)]
-        
-        return {
-            "total_nodes": graph.number_of_nodes(),
-            "total_edges": graph.number_of_edges(),
-            "io_nodes": len(io_nodes),
-            "chassis_nodes": len(chassis_nodes),
-            "node_types": {"io": len(io_nodes), "chassis": len(chassis_nodes)}
-        }
-
-    def _validate_graph(self, graph):
-        """Basic graph validation."""
-        warnings = []
-        if not nx.is_connected(graph):
-            warnings.append("Graph is not connected")
-        
-        isolated_nodes = list(nx.isolates(graph))
-        if isolated_nodes:
-            warnings.append(f"Found {len(isolated_nodes)} isolated nodes")
-            
-        return {"warnings": warnings, "is_valid": len(warnings) == 0}
 
 
 class MatplotlibWidget(QWidget):
@@ -294,6 +266,33 @@ class MatplotlibWidget(QWidget):
 class WiringHarnessOptimizer(QMainWindow):
     """Main application window with integrated processing and visualization."""
     
+    @staticmethod
+    def _get_graph_statistics(graph):
+        """Get basic graph statistics."""
+        io_nodes = [n for n, d in graph.nodes(data=True) if d.get("is_io", False)]
+        chassis_nodes = [n for n, d in graph.nodes(data=True) if not d.get("is_io", False)]
+        
+        return {
+            "total_nodes": graph.number_of_nodes(),
+            "total_edges": graph.number_of_edges(),
+            "io_nodes": len(io_nodes),
+            "chassis_nodes": len(chassis_nodes),
+            "node_types": {"io": len(io_nodes), "chassis": len(chassis_nodes)}
+        }
+
+    @staticmethod
+    def _validate_graph(graph):
+        """Basic graph validation."""
+        warnings = []
+        if not nx.is_connected(graph):
+            warnings.append("Graph is not connected")
+        
+        isolated_nodes = list(nx.isolates(graph))
+        if isolated_nodes:
+            warnings.append(f"Found {len(isolated_nodes)} isolated nodes")
+            
+        return {"warnings": warnings, "is_valid": len(warnings) == 0}
+
     def __init__(self, config_manager: ConfigManager):
         super().__init__()
         self.config = config_manager
@@ -540,7 +539,7 @@ class WiringHarnessOptimizer(QMainWindow):
         # Overall Wiring
         self.hpc_view = pg.PlotWidget()
         self._setup_pg_view(self.hpc_view, 'Overall Wiring')
-        self.tab_widget.addTab(self.hpc_view, "OverallWiring")        
+        self.tab_widget.addTab(self.hpc_view, "Overall Wiring")        
         
         # Clustering Results
         self.cluster_view = pg.PlotWidget()
@@ -919,6 +918,30 @@ class WiringHarnessOptimizer(QMainWindow):
 
     # ==== UTILITY FUNCTIONS ====
 
+    def _export_plot_to_image_bytes(self, plot_widget: pg.PlotWidget) -> bytes:
+        """
+        Exports a pyqtgraph PlotWidget to an in-memory PNG and returns the bytes.
+        
+        This allows non-GUI modules like the report generator to access plot
+        visualizations without directly handling GUI objects.
+
+        Args:
+            plot_widget: The pyqtgraph widget to export.
+
+        Returns:
+            The PNG image data as a byte string.
+        """
+        pixmap = plot_widget.grab()
+        
+        buffer = QBuffer()
+        buffer.open(QIODevice.ReadWrite)
+        # Save the pixmap to the buffer in PNG format. PNG is chosen for its
+        # lossless compression, which is ideal for line art like graphs.
+        pixmap.save(buffer, "PNG")
+        buffer.seek(0)
+        
+        return buffer.readAll().data()
+
     def _get_node_positions(self, graph) -> Dict[str, Tuple[float, float]]:
         """Extract node positions from graph."""
         pos = {}
@@ -1104,7 +1127,7 @@ class WiringHarnessOptimizer(QMainWindow):
         hpc_length = self.hpc_results.get("total_length", 0.0)
 
         if hpc_length > 0:
-            self.log(f" Comparison: EEA with I/O Extenders vs. Overall  Wiring")
+            self.log(f" Comparison: EEA with I/O Extenders vs. Overall Wiring")
             self.log(f"   Overall Wiring: {hpc_length:.2f} mm")
 
             if cluster_length_without_can > 0:
@@ -1206,7 +1229,11 @@ class WiringHarnessOptimizer(QMainWindow):
                 QMessageBox.critical(self, "Export Error", error_msg)
 
     def export_report_pdf(self):
-        """Export comprehensive PDF report."""
+        """Export comprehensive PDF report via ReportGenerator module."""
+        if not self.current_graph:
+            QMessageBox.warning(self, "No Data", "No data available to generate a report. Please process files first.")
+            return
+
         export_dir = self.config.get("paths.export_dir", "./export")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_path = os.path.join(export_dir, f"wiring_report_{timestamp}.pdf")
@@ -1219,30 +1246,9 @@ class WiringHarnessOptimizer(QMainWindow):
             return
 
         try:
-            doc = SimpleDocTemplate(file_path, pagesize=A4)
-            styles = getSampleStyleSheet()
-            story = []
-
-            # Title
-            story.append(Paragraph("Automotive Wiring Harness Optimization Report", styles["Title"]))
-            story.append(Spacer(1, 24))
-            story.append(Paragraph(f"Generated: {timestamp}", styles["Normal"]))
-            story.append(PageBreak())
-
-            # Add sections based on available results
-            if self.current_graph:
-                self._add_graph_section(story, styles)
+            report_generator = ReportGenerator(self)
+            report_generator.generate_pdf(file_path)
             
-            if self.elbow_data:
-                self._add_elbow_section(story, styles)
-            
-            if self.clustering_results:
-                self._add_clustering_section(story, styles)
-            
-            if self.hpc_results:
-                self._add_hpc_section(story, styles)
-
-            doc.build(story)
             self.log(f" PDF report exported: {os.path.basename(file_path)}")
             QMessageBox.information(self, "Export Complete", f"Report exported to:\n{file_path}")
             
@@ -1251,63 +1257,27 @@ class WiringHarnessOptimizer(QMainWindow):
             self.log(f" {error_msg}")
             QMessageBox.critical(self, "Export Error", error_msg)
 
-    def _add_graph_section(self, story, styles):
-        """Add graph statistics section to PDF."""
-        story.append(Paragraph("Graph Statistics", styles["Heading1"]))
-        
-        stats_data = [
-            ["Total Nodes", self.current_graph.number_of_nodes()],
-            ["Total Edges", self.current_graph.number_of_edges()],
-            ["I/O Nodes", len([n for n, d in self.current_graph.nodes(data=True) if d.get("is_io")])],
-            ["Chassis Nodes", len([n for n, d in self.current_graph.nodes(data=True) if not d.get("is_io")])],
-        ]
-        
-        table = Table(stats_data, colWidths=[200, 100])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
-            ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
-        ]))
-        story.append(table)
-        story.append(PageBreak())
-
-    def _add_elbow_section(self, story, styles):
-        """Add elbow analysis section to PDF."""
-        story.append(Paragraph("Elbow Analysis", styles["Heading1"]))
-        story.append(Paragraph(f"Optimal clusters found: {self.elbow_data.get('elbow_k', 'N/A')}", styles["Normal"]))
-        story.append(PageBreak())
-
-    def _add_clustering_section(self, story, styles):
-        """Add clustering section to PDF."""
-        story.append(Paragraph("Clustering Results", styles["Heading1"]))
-        
-        total_length = self.clustering_results.get("total_wire_length", 0)
-        story.append(Paragraph(f"Total wire length: {total_length:.2f} mm", styles["Normal"]))
-        
-        clusters = self.clustering_results.get("clusters", {})
-        story.append(Paragraph(f"Number of clusters: {len(clusters)}", styles["Normal"]))
-        story.append(PageBreak())
-
-    def _add_hpc_section(self, story, styles):
-        """Add HPC section to PDF."""
-        story.append(Paragraph("HPC Wiring Analysis", styles["Heading1"]))
-        
-        total_length = self.hpc_results.get("total_length", 0)
-        story.append(Paragraph(f"Total HPC wire length: {total_length:.2f} mm", styles["Normal"]))
-        story.append(PageBreak())
-
     def show_about_dialog(self):
         """Show about dialog."""
         QMessageBox.about(
-            self, "About",
-            "Automotive Wiring Harness Optimizer\n\n"
-            "A comprehensive tool for optimizing automotive wiring harness layouts.\n\n"
-            "Features:\n"
-            "• Graph-based chassis modeling\n"
-            "• I/O clustering and optimization\n"
-            "• HPC wiring analysis\n"
-            "• Elbow method for optimal cluster detection\n"
-            "• Comprehensive visualization and reporting\n\n"
-            "Fully configurable via YAML configuration."
+            self, "About CONVIO",
+            "<h3>CONVIO: Automotive Wiring Harness Optimizer</h3>"
+            "<p>Version 1.0</p>"
+            "<p>CONVIO is a specialized engineering tool designed to streamline and "
+            "optimize the complex process of automotive wiring harness design. "
+            "By leveraging advanced computational methods, CONVIO provides a robust "
+            "platform for engineers to design, analyze, and refine wiring layouts "
+            "with greater efficiency and precision.</p>"
+            "<b>Core Capabilities:</b>"
+            "<ul>"
+            "<li><b>Graph-Based System Modeling:</b> Accurately models the vehicle chassis and I/O points.</li>"
+            "<li><b>Automated Cluster Analysis:</b> Uses the elbow method to scientifically determine the optimal number of I/O clusters.</li>"
+            "<li><b>Shortest-Path Optimization:</b> Implements Dijkstra's algorithm for efficient wiring path calculation.</li>"
+            "<li><b>Comparative Analysis:</b> Benchmarks optimized zonal architectures against traditional direct-to-HPC wiring.</li>"
+            "<li><b>Insightful Reporting:</b> Generates comprehensive reports and visualizations to support design decisions.</li>"
+            "</ul>"
+            "<p>Built with flexibility in mind, CONVIO's entire workflow is controlled "
+            "through a clear and concise YAML configuration, ensuring adaptability and reproducibility.</p>"
         )
 
     def log(self, message: str):
