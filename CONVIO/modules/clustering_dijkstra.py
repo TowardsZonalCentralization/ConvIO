@@ -152,13 +152,14 @@ class ClusteringDijkstra:
         return None
     
     @profile_function
-    def cluster_and_optimize(self, graph: nx.Graph, n_clusters: int) -> Dict[str, Any]:
+    def cluster_and_optimize(self, graph: nx.Graph, n_clusters: int, linkage_method: str = 'complete') -> Dict[str, Any]:
         """
         Executes the full clustering and optimization workflow.
 
         Args:
             graph: The input graph containing chassis and I/O nodes.
             n_clusters: The desired number of clusters to create.
+            linkage_method: The linkage criterion to use ('complete', 'average', 'single').
 
         Returns:
             A dictionary containing the complete results, including cluster
@@ -177,19 +178,26 @@ class ClusteringDijkstra:
         io_attachment_map = self._infer_attachment_nodes(graph, io_nodes)
 
         # Step 3: Group I/O nodes into clusters.
-        labels = self._cluster_by_graph_distance(chassis, io_nodes, io_attachment_map, k)
+        self.logger.info(f"Starting clustering with k={k} and linkage='{linkage_method}'...")
+        labels = self._cluster_by_graph_distance(chassis, io_nodes, io_attachment_map, k, linkage_method)
         clusters = {f"cluster_{i}": {"io_nodes": []} for i in range(k)}
         for i, node in enumerate(io_nodes):
             clusters[f"cluster_{labels[i]}"]["io_nodes"].append(node)
 
-        # Step 4: For each cluster, find the optimal extender location and calculate wire lengths.
-        total_wire_length = 0.0
+        # Step 4: Refine the initial clusters by re-assigning I/Os to their closest centroids.
         all_pairs_lengths = dict(nx.all_pairs_dijkstra_path_length(chassis, weight="weight"))
+        self.logger.info("Refining cluster assignments based on optimal centroids...")
+        clusters = self._refine_cluster_assignments(graph, chassis, clusters, all_pairs_lengths)
+
+        # Step 5: For each FINAL cluster, find the optimal extender location and calculate wire lengths.
+        total_wire_length = 0.0
         for cid, cdata in clusters.items():
+            if not cdata["io_nodes"]:  # Skip empty clusters that may result from refinement
+                continue
             cluster_length = self._process_single_cluster(graph, chassis, pos, cid, cdata, all_pairs_lengths)
             total_wire_length += cluster_length
 
-        # Step 5: Format and export the final results.
+        # Step 6: Format and export the final results.
         return self._format_and_export_output(graph, clusters, total_wire_length)
 
     # --- Helper Methods for Graph Preparation ---
@@ -204,7 +212,7 @@ class ClusteringDijkstra:
 
     @profile_function
     def _cluster_by_graph_distance(self, chassis: nx.Graph, io_nodes: List[str],
-                                   io_attachment_map: Dict[str, str], k: int) -> np.ndarray:
+                                   io_attachment_map: Dict[str, str], k: int, linkage: str) -> np.ndarray:
         """
         Clusters I/O nodes based on their shortest path distances within the chassis graph.
         """
@@ -219,8 +227,79 @@ class ClusteringDijkstra:
             dist_matrix[np.isinf(dist_matrix)] = max_dist * 10
 
         # Use Agglomerative Clustering with the precomputed distance matrix.
-        clusterer = AgglomerativeClustering(n_clusters=k, metric='precomputed', linkage='complete')
+        clusterer = AgglomerativeClustering(n_clusters=k, metric='precomputed', linkage=linkage)
         return clusterer.fit_predict(dist_matrix)
+
+    @profile_function
+    def _find_optimal_centroid(self, graph: nx.Graph, chassis: nx.Graph,
+                               io_nodes_in_cluster: List[str],
+                               all_pairs_lengths: Dict) -> Optional[Dict[str, Any]]:
+        """Finds the single best candidate location for an extender for a given set of I/O nodes."""
+        if not io_nodes_in_cluster:
+            return None
+
+        pos = {n: chassis.nodes[n]["pos"] for n in chassis.nodes()}
+        attachment_nodes_map = self._infer_attachment_nodes(graph, io_nodes_in_cluster)
+        candidates = self._generate_candidates(chassis, pos)
+
+        best_cost = float('inf')
+        best_candidate = None
+        for cand in candidates:
+            cost = self._evaluate_candidate_cost(graph, chassis, cand, io_nodes_in_cluster, attachment_nodes_map, all_pairs_lengths)
+            if cost < best_cost:
+                best_cost, best_candidate = cost, cand
+        
+        return best_candidate
+
+    @profile_function
+    def _refine_cluster_assignments(self, graph: nx.Graph, chassis: nx.Graph,
+                                    initial_clusters: Dict[str, Any],
+                                    all_pairs_lengths: Dict) -> Dict[str, Any]:
+        """
+        Iteratively refines cluster assignments by moving I/O nodes to the zone
+        with the nearest centroid.
+        """
+        clusters = initial_clusters
+        max_iterations = 5  # Prevents infinite loops, usually converges in 2-3 steps.
+        
+        for i in range(max_iterations):
+            self.logger.info(f"Refinement iteration {i + 1}...")
+            
+            # 1. Find the optimal centroid for each current cluster.
+            centroids = {}
+            for cid, cdata in clusters.items():
+                if cdata["io_nodes"]:
+                    centroids[cid] = self._find_optimal_centroid(graph, chassis, cdata["io_nodes"], all_pairs_lengths)
+
+            # 2. For each I/O, find its closest centroid and re-assign if necessary.
+            assignments_changed = False
+            all_io_nodes = [node for cdata in clusters.values() for node in cdata["io_nodes"]]
+            
+            for io_node in all_io_nodes:
+                current_cid = next((cid for cid, cdata in clusters.items() if io_node in cdata["io_nodes"]), None)
+                
+                min_dist = float('inf')
+                best_cid = None
+                attachment_node = self._infer_attachment_nodes(graph, [io_node])[io_node]
+
+                for cid, centroid in centroids.items():
+                    if not centroid: continue
+                    _, length = self._get_path_and_length_from_centroid(chassis, centroid, attachment_node)
+                    io_edge_length = graph[attachment_node][io_node].get("weight", 0.0)
+                    total_dist = length + io_edge_length
+                    if total_dist < min_dist:
+                        min_dist, best_cid = total_dist, cid
+                
+                if best_cid and best_cid != current_cid:
+                    clusters[current_cid]["io_nodes"].remove(io_node)
+                    clusters[best_cid]["io_nodes"].append(io_node)
+                    assignments_changed = True
+            
+            if not assignments_changed:
+                self.logger.info("Cluster assignments have stabilized. Finishing refinement.")
+                break
+        
+        return clusters
 
     @profile_function
     def _process_single_cluster(self, graph: nx.Graph, chassis: nx.Graph,
@@ -233,20 +312,12 @@ class ClusteringDijkstra:
         io_nodes = cdata["io_nodes"]
         if not io_nodes: return 0.0
 
-        # Identify the chassis nodes connected to the I/O nodes in this cluster.
-        attachment_nodes = self._infer_attachment_nodes(graph, io_nodes)
-        attachment_nodes_in_cluster = [attachment_nodes[ion] for ion in io_nodes]
-
-        # Generate all possible locations for the I/O extender (centroid).
-        candidates = self._generate_candidates(chassis, pos)
-
         # Find the candidate that results in the shortest total wire length for the cluster.
-        best_cost = float('inf')
-        best_candidate = None
-        for cand in candidates:
-            cost = self._evaluate_candidate_cost(graph, chassis, cand, io_nodes, attachment_nodes, all_pairs_lengths)
-            if cost < best_cost:
-                best_cost, best_candidate = cost, cand
+        best_candidate = self._find_optimal_centroid(graph, chassis, io_nodes, all_pairs_lengths)
+        
+        # Calculate the final cost using the best candidate
+        attachment_nodes = self._infer_attachment_nodes(graph, io_nodes)
+        best_cost = self._evaluate_candidate_cost(graph, chassis, best_candidate, io_nodes, attachment_nodes, all_pairs_lengths)
 
         # Store the best found centroid and its associated cost.
         cdata["centroid"] = best_candidate

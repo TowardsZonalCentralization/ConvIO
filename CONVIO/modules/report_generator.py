@@ -124,6 +124,15 @@ class ReportGenerator:
         self.story.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d')}", self.styles["Normal"]))
         self.story.append(Paragraph(f"<b>Input Chassis File:</b> {os.path.basename(self.app.chassis_file_path or 'N/A')}", self.styles["Normal"]))
         self.story.append(Paragraph(f"<b>Input I/O File:</b> {os.path.basename(self.app.io_file_path or 'N/A')}", self.styles["Normal"]))
+        
+        # Determine which linkage method to display
+        if self.app.comparison_results:
+            linkage_method = self.app.comparison_results.get("best_method", "N/A")
+            self.story.append(Paragraph(f"<b>Optimal Linkage Method (Recommended):</b> {linkage_method}", self.styles["Normal"]))
+        else:
+            linkage_method = self.app.linkage_combo.currentText()
+            self.story.append(Paragraph(f"<b>Clustering Linkage Method (Manual Run):</b> {linkage_method}", self.styles["Normal"]))
+
         self.story.append(PageBreak())
 
     def _add_abstract(self):
@@ -189,11 +198,10 @@ class ReportGenerator:
         self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Zonal Architecture Optimization (`clustering_dijkstra.py`)", self.styles["h2"]))
         sub_sec += 1
         method_text = (
-            "With the optimal number of clusters determined, the `clustering_dijkstra` module executes the primary optimization. "
-            "It first constructs a distance matrix representing the true shortest-path distance within the chassis graph between every pair of I/O nodes. "
-            "Using this matrix, it partitions the I/O nodes using Agglomerative Clustering, which is ideal for precomputed distances. "
-            "For each resulting cluster, it calculates an optimal geometric centroid for an I/O extender. Finally, it uses Dijkstra's algorithm to find the "
-            "shortest path from each I/O node to its centroid and to form a CAN bus backbone connecting all extenders to the HPC."
+            "With the optimal number of clusters determined, the `clustering_dijkstra` module executes a sophisticated two-stage optimization. "
+            "<b>First</b>, it constructs a distance matrix representing the true shortest-path distance within the chassis graph between every pair of I/O nodes. "
+            "Using this matrix, it performs an initial partitioning of the I/O nodes using Agglomerative Clustering to establish a strong baseline grouping. "
+            "<b>Second</b>, it enters a refinement phase. For each initial cluster, an optimal I/O extender location (centroid) is calculated. The algorithm then iteratively re-assigns each I/O node to the zone with the closest centroid, ensuring that the final groupings are not just based on I/O-to-I/O proximity, but on the more critical I/O-to-extender wiring distance. This process repeats until the cluster memberships stabilize, guaranteeing a more logically and efficiently partitioned zonal architecture."
         )
         self.story.append(Paragraph(method_text, self.styles['Justify']))
         self.story.append(Spacer(1, 0.1*inch))
@@ -274,6 +282,12 @@ class ReportGenerator:
         sub_sec += 1
         self._add_graph_table()
         
+        # Linkage Method Comparison
+        if self.app.comparison_results:
+            self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Linkage Method Comparison", self.styles["h2"]))
+            sub_sec += 1
+            self._add_linkage_comparison_section()
+
         # Elbow Analysis
         if self.app.elbow_data:
             self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Optimal Cluster Determination", self.styles["h2"]))
@@ -292,6 +306,7 @@ class ReportGenerator:
             self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Optimized Zonal Architecture with I/O Extenders Analysis", self.styles["h2"]))
             sub_sec += 1
             self._add_clustering_tables()
+            # The main figure will be of the best result if available, otherwise the manual run
             self._add_clustering_figure()
         
         # Comparison
@@ -380,6 +395,11 @@ class ReportGenerator:
 
     def _add_clustering_figure(self):
         """Adds the Zonal EEA visualization to the report."""
+        title = "Optimized Zonal EEA with I/O Extenders"
+        if self.app.comparison_results:
+            best_method = self.app.comparison_results.get("best_method", "N/A")
+            title = f"Optimized Zonal EEA (Recommended Method: '{best_method}')"
+
         self.story.append(Paragraph(f"The visualization of the optimized Zonal EE Architecture is shown in Fig. {self.fig_counter}. I/O nodes are color-coded by cluster, with wiring paths shown to their respective I/O Extenders (centroids).", self.styles["Justify"]))
         try:
             image_bytes = self.app._export_plot_to_image_bytes(self.app.cluster_view)
@@ -387,7 +407,7 @@ class ReportGenerator:
 
             img = Image(img_buffer, width=6*inch, height=4.5*inch, kind='proportional')
             self.story.append(img)
-            self.story.append(Paragraph(f"Fig. {self.fig_counter}. Optimized Zonal EEA with I/O Extenders", self.styles['Caption']))
+            self.story.append(Paragraph(f"Fig. {self.fig_counter}. {title}", self.styles['Caption']))
             self.fig_counter += 1
         except Exception as e:
             self.story.append(Paragraph(f"<i>Could not render clustering plot: {e}</i>", self.styles["Italic"]))
@@ -414,9 +434,37 @@ class ReportGenerator:
         self.story.append(PageBreak())
 
     def _add_clustering_tables(self):
-        wire_len = self.app.clustering_results.get("total_wire_length", 0)
-        can_len = self.app.clustering_results.get("can_bus", {}).get("total_length", 0)
-        total_len = self.app.clustering_results.get("overall_wiring_harness_length", 0)
+        # If a full comparison was run, show the detailed tables for all methods.
+        if self.app.comparison_results:
+            results_to_process = self.app.comparison_results.get("results", {})
+            best_method = self.app.comparison_results.get("best_method")
+            
+            self.story.append(Paragraph("Detailed Breakdown by Linkage Method", self.styles["h3"]))
+            self.story.append(Spacer(1, 0.1*inch))
+
+            # Sort to ensure a consistent order in the report
+            for method in sorted(results_to_process.keys()):
+                results = results_to_process[method]
+                if not results: continue
+                
+                is_best = " (Recommended)" if method == best_method else ""
+                self.story.append(Paragraph(f"<b>Results for '{method}' Linkage{is_best}</b>", self.styles["h3"]))
+                
+                self._generate_tables_for_single_result(results, method_name=method)
+                self.story.append(PageBreak())
+
+        # Fallback for a single, manual run
+        elif self.app.clustering_results:
+            self._generate_tables_for_single_result(self.app.clustering_results)
+
+    def _generate_tables_for_single_result(self, clustering_results, method_name: str = ""):
+        """
+        Helper to generate the set of tables and the corresponding plot for a
+        single clustering result dict.
+        """
+        wire_len = clustering_results.get("total_wire_length", 0)
+        can_len = clustering_results.get("can_bus", {}).get("total_length", 0)
+        total_len = clustering_results.get("overall_wiring_harness_length", 0)
         wire_cost = (wire_len / 1000.0) * self.app.cost_cfg.get("wire_price_per_m", 0.0)
         can_cost = (can_len / 1000.0) * self.app.cost_cfg.get("CAN_bus_price_per_m", 0.0)
         currency = self.app.cost_cfg.get("currency", "")
@@ -435,14 +483,20 @@ class ReportGenerator:
         self.story.append(table)
         self.story.append(Paragraph(f"TABLE {self.tbl_counter}. ZONAL ARCHITECTURE COST & LENGTH SUMMARY", self.styles['Caption']))
         self.tbl_counter += 1
-        self.story.append(PageBreak())
+        self.story.append(Spacer(1, 0.2*inch))
 
-        clusters = self.app.clustering_results.get("clusters", {})
+        clusters = clustering_results.get("clusters", {})
         path_style = self.styles["Code"].clone('PathStyle', fontSize=7, leading=8)
-        for cid, cdata in clusters.items():
+        
+        # Check if there are any clusters to detail
+        if not any(cid != "can_bus" for cid in clusters):
+            self.story.append(Paragraph("No detailed cluster data to display for this method.", self.styles['Normal']))
+            return
+
+        for cid, cdata in sorted(clusters.items()):
             if cid == "can_bus": continue
             cluster_id_str = cid.split('_')[-1]
-            self.story.append(Paragraph(f"<b>Cluster {cluster_id_str} Wiring Details</b>", self.styles["h3"]))
+            self.story.append(Paragraph(f"<b>Cluster {cluster_id_str} Wiring Details</b>", self.styles["h4"]))
             wiring_paths = cdata.get("wiring_paths", {})
             path_data = [[Paragraph(c, self.styles["Normal"]) for c in ["I/O Node", "Length (mm)", "Shortest Path"]]]
             for io_node in sorted(wiring_paths.keys()):
@@ -461,7 +515,66 @@ class ReportGenerator:
             self.story.append(path_table)
             self.story.append(Paragraph(f"TABLE {self.tbl_counter}. WIRING PATHS FOR CLUSTER {cluster_id_str}", self.styles['Caption']))
             self.tbl_counter += 1
-            self.story.append(PageBreak())
+            self.story.append(Spacer(1, 0.2*inch))
+        
+        # Add the plot for this specific method if it's part of a comparison
+        if self.app.comparison_results and method_name:
+            self.story.append(Spacer(1, 0.2*inch))
+            try:
+                title = f"Zonal EEA Visualization for '{method_name}' Linkage"
+                image_bytes = self.app.generate_clustering_plot_for_report(clustering_results, title)
+                img_buffer = io.BytesIO(image_bytes)
+                img = Image(img_buffer, width=6*inch, height=4.5*inch, kind='proportional')
+                self.story.append(img)
+                self.story.append(Paragraph(f"Fig. {self.fig_counter}. {title}", self.styles['Caption']))
+                self.fig_counter += 1
+            except Exception as e:
+                self.story.append(Paragraph(f"<i>Could not render plot for '{method_name}': {e}</i>", self.styles["Italic"]))
+
+    def _add_linkage_comparison_section(self):
+        """Adds the linkage method comparison table and text to the report."""
+        self.story.append(Paragraph(
+            "To ensure the most optimal clustering strategy, a comprehensive analysis was performed, comparing three standard linkage methods. "
+            "The table below summarizes the final wiring harness length for each method after the full optimization and refinement process. "
+            "The method yielding the shortest overall length is recommended and used for all subsequent detailed analysis in this report.",
+            self.styles['Justify']
+        ))
+        self.story.append(Spacer(1, 0.15*inch))
+
+        results = self.app.comparison_results.get("results", {})
+        best_method = self.app.comparison_results.get("best_method")
+        
+        data = [
+            [Paragraph(c, self.styles["Normal"]) for c in ["Linkage Method", "I/O Wiring (mm)", "CAN Bus (mm)", "Total Length (mm)"]]
+        ]
+        
+        methods = ["average", "complete", "single"]
+        for method in methods:
+            res = results.get(method, {})
+            wire_len = res.get("total_wire_length", 0.0)
+            can_len = res.get("can_bus", {}).get("total_length", 0.0)
+            total_len = res.get("overall_wiring_harness_length", 0.0)
+            
+            row_data = [
+                Paragraph(f"<b>{method}</b>" if method == best_method else method, self.styles["Normal"]),
+                Paragraph(f"<b>{wire_len:.2f}</b>" if method == best_method else f"{wire_len:.2f}", self.styles["Normal"]),
+                Paragraph(f"<b>{can_len:.2f}</b>" if method == best_method else f"{can_len:.2f}", self.styles["Normal"]),
+                Paragraph(f"<b>{total_len:.2f}</b>" if method == best_method else f"{total_len:.2f}", self.styles["Normal"]),
+            ]
+            data.append(row_data)
+
+        table = Table(data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.darkgrey),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ('BACKGROUND', (0, methods.index(best_method)+1), (-1, methods.index(best_method)+1), colors.HexColor('#d4edda'))
+        ]))
+        self.story.append(table)
+        self.story.append(Paragraph(f"TABLE {self.tbl_counter}. LINKAGE METHOD COMPARISON", self.styles['Caption']))
+        self.tbl_counter += 1
+        self.story.append(PageBreak())
 
     def _add_comparison_table(self):
         hpc_len = self.app.hpc_results.get("total_length", 0.0)

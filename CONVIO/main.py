@@ -36,10 +36,10 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QFileDialog, QTextEdit, QTabWidget, QSpinBox, QProgressBar, QMessageBox,
     QSplitter, QGroupBox, QGridLayout, QAction, QFormLayout, QDoubleSpinBox, QComboBox,
-    QScrollArea, QCheckBox
+    QScrollArea, QCheckBox, QDialog, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QBuffer, QIODevice
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtGui import QFont, QPixmap, QColor
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -152,6 +152,8 @@ class OptimizationWorker(QThread):
                 self.elbow_analysis_task()
             elif self.task_type == "clustering":
                 self.clustering_task()
+            elif self.task_type == "full_analysis":
+                self.full_analysis_task()
             elif self.task_type == "hpc_wiring":
                 self.hpc_wiring_task()
         except Exception as e:
@@ -227,7 +229,8 @@ class OptimizationWorker(QThread):
             self.status_updated.emit("Performing clustering and shortest path analysis...")
             clusterer = ClusteringDijkstra(config=self.config.config)
             n_clusters = int(self.kwargs['n_clusters'])
-            results = clusterer.cluster_and_optimize(self.kwargs['graph'], n_clusters)
+            linkage = self.kwargs.get('linkage_method', 'complete')  # Default to 'complete' if not provided
+            results = clusterer.cluster_and_optimize(self.kwargs['graph'], n_clusters, linkage_method=linkage)
             return results
     
         try:
@@ -235,6 +238,41 @@ class OptimizationWorker(QThread):
             self.finished.emit(result)
         except Exception as e:
             self.error_occurred.emit(f"Clustering failed: {e}")
+
+    def full_analysis_task(self):
+        def _full_analysis_internal():
+            self.status_updated.emit("Starting comprehensive analysis...")
+            clusterer = ClusteringDijkstra(config=self.config.config)
+            n_clusters = int(self.kwargs['n_clusters'])
+            graph = self.kwargs['graph']
+            
+            linkage_methods = ['average', 'complete', 'single']
+            results = {}
+            best_length = float('inf')
+            best_method = None
+
+            for i, method in enumerate(linkage_methods):
+                self.status_updated.emit(f"Running analysis with '{method}' linkage...")
+                self.progress_updated.emit(int((i / len(linkage_methods)) * 100))
+                
+                run_result = clusterer.cluster_and_optimize(graph, n_clusters, linkage_method=method)
+                results[method] = run_result
+                
+                total_length = run_result.get("overall_wiring_harness_length", float('inf'))
+                if total_length < best_length:
+                    best_length = total_length
+                    best_method = method
+            
+            self.progress_updated.emit(100)
+            self.status_updated.emit("Comprehensive analysis complete!")
+            
+            return {"results": results, "best_method": best_method}
+
+        try:
+            result = _full_analysis_internal()
+            self.finished.emit(result)
+        except Exception as e:
+            self.error_occurred.emit(f"Full analysis failed: {e}")
 
 
     def hpc_wiring_task(self):
@@ -250,6 +288,82 @@ class OptimizationWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(f"Overall wiring calculation failed: {e}")
 
+
+
+class ComparisonWindow(QDialog):
+    """A dialog window to display the comparison of clustering methods."""
+    def __init__(self, data, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Linkage Method Comparison")
+        self.setMinimumSize(600, 200)
+        
+        layout = QVBoxLayout(self)
+        
+        # Title
+        title = QLabel("<b>Comprehensive Analysis Results</b>")
+        title.setFont(QFont("Arial", 14))
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        # Table
+        self.table = QTableWidget()
+        self.table.setRowCount(3)
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Linkage Method", "I/O Wiring (mm)", "CAN Bus (mm)", "Total Length (mm)"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.table)
+        
+        # Populate data
+        self._populate_table(data)
+        
+        # Recommendation text
+        best_method = data.get('best_method', 'N/A')
+        rec_text = f"<b>Recommendation:</b> The '<b>{best_method}</b>' linkage method produced the shortest overall wiring harness length and has been selected for detailed visualization."
+        recommendation = QLabel(rec_text)
+        recommendation.setWordWrap(True)
+        layout.addWidget(recommendation)
+
+    def _populate_table(self, data):
+        results = data.get("results", {})
+        best_method = data.get("best_method")
+        
+        methods = ["average", "complete", "single"]
+        for row, method in enumerate(methods):
+            res = results.get(method, {})
+            
+            # Method name
+            item_method = QTableWidgetItem(method)
+            
+            # I/O Wiring
+            wire_len = res.get("total_wire_length", 0.0)
+            item_wire = QTableWidgetItem(f"{wire_len:.2f}")
+            
+            # CAN Bus
+            can_len = res.get("can_bus", {}).get("total_length", 0.0)
+            item_can = QTableWidgetItem(f"{can_len:.2f}")
+            
+            # Total Length
+            total_len = res.get("overall_wiring_harness_length", 0.0)
+            item_total = QTableWidgetItem(f"{total_len:.2f}")
+            
+            # Highlight the best row
+            if method == best_method:
+                font = QFont()
+                font.setBold(True)
+                item_method.setFont(font)
+                item_wire.setFont(font)
+                item_can.setFont(font)
+                item_total.setFont(font)
+                
+            self.table.setItem(row, 0, item_method)
+            self.table.setItem(row, 1, item_wire)
+            self.table.setItem(row, 2, item_can)
+            self.table.setItem(row, 3, item_total)
+
+            if method == best_method:
+                # Set background color for all cells in the best row
+                for col in range(4):
+                    self.table.item(row, col).setBackground(QColor('#d4edda'))
 
 
 class MatplotlibWidget(QWidget):
@@ -302,6 +416,7 @@ class WiringHarnessOptimizer(QMainWindow):
         self.graph_loader = None
         self.elbow_data: Optional[Dict[str, Any]] = None
         self.clustering_results: Optional[Dict[str, Any]] = None
+        self.comparison_results: Optional[Dict[str, Any]] = None
         self.hpc_results: Optional[Dict[str, Any]] = None
         self.chassis_file_path: Optional[str] = None
         self.io_file_path: Optional[str] = None
@@ -477,22 +592,32 @@ class WiringHarnessOptimizer(QMainWindow):
         self.n_clusters_spin.setValue(3)
         cl_layout.addWidget(self.n_clusters_spin, 0, 1)
 
+        cl_layout.addWidget(QLabel("Linkage Method:"), 1, 0)
+        self.linkage_combo = QComboBox()
+        self.linkage_combo.addItems(["average", "complete", "single"])
+        cl_layout.addWidget(self.linkage_combo, 1, 1)
+
         self.clustering_btn = QPushButton("Run Clustering & Optimization")
         self.clustering_btn.clicked.connect(self.run_clustering)
         self.clustering_btn.setEnabled(False)
-        cl_layout.addWidget(self.clustering_btn, 1, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_btn, 2, 0, 1, 2)
+
+        self.full_analysis_btn = QPushButton("Run Full Analysis & Compare")
+        self.full_analysis_btn.clicked.connect(self.run_full_analysis)
+        self.full_analysis_btn.setEnabled(False)
+        cl_layout.addWidget(self.full_analysis_btn, 3, 0, 1, 2)
 
         self.clustering_total_label = QLabel("Clustering Total Length: Not calculated")
-        cl_layout.addWidget(self.clustering_total_label, 2, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_total_label, 4, 0, 1, 2)
 
         self.clustering_cost_label = QLabel("Cost: Not calculated")
-        cl_layout.addWidget(self.clustering_cost_label, 3, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_cost_label, 5, 0, 1, 2)
 
         self.clustering_with_can_label = QLabel("Total with CAN FD: Not calculated")
-        cl_layout.addWidget(self.clustering_with_can_label, 4, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_with_can_label, 6, 0, 1, 2)
 
         self.clustering_with_can_cost_label = QLabel("Cost: Not calculated")
-        cl_layout.addWidget(self.clustering_with_can_cost_label, 5, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_with_can_cost_label, 7, 0, 1, 2)
 
         layout.addWidget(cl_group)
 
@@ -603,10 +728,26 @@ class WiringHarnessOptimizer(QMainWindow):
             return
 
         n_clusters = int(self.n_clusters_spin.value())
+        linkage_method = self.linkage_combo.currentText()
         self._start_worker_task()
-        self.worker = OptimizationWorker("clustering", self.config, graph=self.current_graph, n_clusters=n_clusters)
+        self.worker = OptimizationWorker("clustering", self.config, graph=self.current_graph, n_clusters=n_clusters, linkage_method=linkage_method)
         self.worker.status_updated.connect(self.status_label.setText)
         self.worker.finished.connect(self.on_clustering_completed)
+        self.worker.error_occurred.connect(self.on_error)
+        self.worker.start()
+
+    def run_full_analysis(self):
+        """Run comprehensive analysis comparing all linkage methods."""
+        if not self.current_graph:
+            QMessageBox.warning(self, "No graph", "Load and process files first.")
+            return
+
+        n_clusters = int(self.n_clusters_spin.value())
+        self._start_worker_task()
+        self.worker = OptimizationWorker("full_analysis", self.config, graph=self.current_graph, n_clusters=n_clusters)
+        self.worker.status_updated.connect(self.status_label.setText)
+        self.worker.progress_updated.connect(self.progress_bar.setValue)
+        self.worker.finished.connect(self.on_full_analysis_completed)
         self.worker.error_occurred.connect(self.on_error)
         self.worker.start()
 
@@ -649,6 +790,7 @@ class WiringHarnessOptimizer(QMainWindow):
         # Enable next steps
         self.elbow_btn.setEnabled(True)
         self.hpc_btn.setEnabled(True)
+        self.full_analysis_btn.setEnabled(True)
       
 
 
@@ -675,6 +817,23 @@ class WiringHarnessOptimizer(QMainWindow):
 
 
 
+    def on_full_analysis_completed(self, results):
+        """Handle completion of the full analysis and show comparison window."""
+        self.comparison_results = results
+        best_method = results.get('best_method')
+        
+        if best_method and best_method in results.get('results', {}):
+            # Set the main clustering_results to the best one found
+            best_result_data = results['results'][best_method]
+            self.on_clustering_completed(best_result_data) # This will update UI and visuals
+        else:
+            self.log("Full analysis completed, but no best method was determined.")
+            self._finish_worker_task()
+
+        # Show the comparison dialog
+        dialog = ComparisonWindow(results, self)
+        dialog.exec_()
+
     def on_clustering_completed(self, results):
         """Handle clustering completion."""
         self.clustering_results = results
@@ -699,7 +858,7 @@ class WiringHarnessOptimizer(QMainWindow):
             self.clustering_with_can_cost_label.setText(f"Cost: {cost_with_can:.2f} {currency}")
 
         # Visualize clustering results and update comparison
-        self._visualize_clustering_results()
+        self._visualize_clustering_results(self.cluster_view, self.clustering_results)
         if self.hpc_results:
             self._compare_results()
 
@@ -788,25 +947,28 @@ class WiringHarnessOptimizer(QMainWindow):
         # Switch to elbow tab
         self.tab_widget.setCurrentWidget(self.elbow_widget)
 
-    def _visualize_clustering_results(self):
-        """Visualize clustering results with config-driven styling, paths, and labels."""
-        if not self.clustering_results or not self.current_graph:
+    def _visualize_clustering_results(self, view: pg.PlotWidget, clustering_results: Dict[str, Any]):
+        """
+        Visualize clustering results on a given PlotWidget.
+        This is decoupled from the main UI to allow for off-screen rendering for reports.
+        """
+        if not clustering_results or not self.current_graph:
             self.log("Clustering results not available or missing graph object for visualization.")
             return
 
-        self.cluster_view.clear()
-        self.cluster_view.addLegend().clear()
+        view.clear()
+        view.addLegend().clear()
         
         pos = self._get_node_positions(self.current_graph)
         
         # 1. Draw base chassis graph (nodes and edges)
         chassis_nodes = [n for n, d in self.current_graph.nodes(data=True) if not d.get("is_io")]
         chassis_graph = self.current_graph.subgraph(chassis_nodes)
-        self._draw_graph_edges(self.cluster_view, chassis_graph, pos, alpha=0.2, name="Chassis Edge")
-        self._draw_graph_nodes(self.cluster_view, chassis_graph, pos)
+        self._draw_graph_edges(view, chassis_graph, pos, alpha=0.2, name="Chassis Edge")
+        self._draw_graph_nodes(view, chassis_graph, pos)
 
         # 2. Draw I/O nodes, paths, and centroids by cluster
-        clusters = self.clustering_results.get("clusters", {})
+        clusters = clustering_results.get("clusters", {})
         colors = self._get_cluster_colors()
         legend_items_added = set()
 
@@ -819,7 +981,7 @@ class WiringHarnessOptimizer(QMainWindow):
             if io_points:
                 points = np.array(io_points)
                 style = self._get_node_style("", type_name_override="io")
-                self.cluster_view.addItem(
+                view.addItem(
                     pg.ScatterPlotItem(
                         points[:, 0], points[:, 1],
                         size=style.get("size", 7),
@@ -849,14 +1011,14 @@ class WiringHarnessOptimizer(QMainWindow):
                             current_path_name = path_name
                             legend_items_added.add(path_name)
                         
-                        self.cluster_view.addItem(
+                        view.addItem(
                             pg.PlotCurveItem(xs, ys, pen=pg.mkPen(color, width=2.5, style=Qt.DashLine), name=current_path_name)
                         )
 
             # Draw I/O extender (centroid) node and its label
             if centroid_info and "pos" in centroid_info and not is_can_bus:
                 cx, cy = centroid_info["pos"]
-                self.cluster_view.addItem(
+                view.addItem(
                     pg.ScatterPlotItem(
                         [cx], [cy],
                         size=12,
@@ -867,10 +1029,11 @@ class WiringHarnessOptimizer(QMainWindow):
                 )
                 label = pg.TextItem(f"I/O Extender {cluster_id.split('_')[-1]}", color=(0,0,0), anchor=(0.5, -1.0))
                 label.setPos(cx, cy)
-                self.cluster_view.addItem(label)
+                view.addItem(label)
 
-        self._set_view_limits(self.cluster_view, pos)
-        self.tab_widget.setCurrentWidget(self.cluster_view)
+        self._set_view_limits(view, pos)
+        if view == self.cluster_view:
+            self.tab_widget.setCurrentWidget(self.cluster_view)
 
     def _visualize_hpc_wiring(self):
         """Visualize HPC wiring results."""
@@ -917,6 +1080,22 @@ class WiringHarnessOptimizer(QMainWindow):
         self.tab_widget.setCurrentWidget(self.hpc_view)
 
     # ==== UTILITY FUNCTIONS ====
+
+    def generate_clustering_plot_for_report(self, clustering_results: Dict[str, Any], title: str) -> bytes:
+        """
+        Generates a clustering plot image in memory for a given result set.
+        This is used by the report generator to create visuals for all linkage methods
+        without needing to render them in the main UI.
+        """
+        # Create a temporary, off-screen plot widget
+        temp_view = pg.PlotWidget()
+        self._setup_pg_view(temp_view, title)
+        
+        # Use the refactored visualization method to draw on the temporary widget
+        self._visualize_clustering_results(temp_view, clustering_results)
+        
+        # Export the contents of the temporary widget to image bytes
+        return self._export_plot_to_image_bytes(temp_view)
 
     def _export_plot_to_image_bytes(self, plot_widget: pg.PlotWidget) -> bytes:
         """
@@ -1099,6 +1278,7 @@ class WiringHarnessOptimizer(QMainWindow):
         self.btn_process.setEnabled(False)
         self.elbow_btn.setEnabled(False)
         self.clustering_btn.setEnabled(False)
+        self.full_analysis_btn.setEnabled(False)
         self.hpc_btn.setEnabled(False)
     
 
@@ -1115,6 +1295,7 @@ class WiringHarnessOptimizer(QMainWindow):
         if self.current_graph:
             self.elbow_btn.setEnabled(True)
             self.clustering_btn.setEnabled(True)
+            self.full_analysis_btn.setEnabled(True)
             self.hpc_btn.setEnabled(True)
 
     def _compare_results(self):
