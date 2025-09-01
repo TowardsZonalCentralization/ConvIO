@@ -244,7 +244,7 @@ class ClusteringDijkstra:
         best_cost = float('inf')
         best_candidate = None
         for cand in candidates:
-            cost = self._evaluate_candidate_cost(chassis, cand, attachment_nodes_in_cluster, all_pairs_lengths)
+            cost = self._evaluate_candidate_cost(graph, chassis, cand, io_nodes, attachment_nodes, all_pairs_lengths)
             if cost < best_cost:
                 best_cost, best_candidate = cost, cand
 
@@ -258,6 +258,11 @@ class ClusteringDijkstra:
             for io_node in io_nodes:
                 attach_node = attachment_nodes[io_node]
                 path, length = self._get_path_and_length_from_centroid(chassis, best_candidate, attach_node)
+                
+                # Add the distance from the attachment node to the I/O node.
+                io_edge_length = graph[attach_node][io_node].get("weight", 0.0)
+                length += io_edge_length
+                
                 full_path = path + [io_node]  # Append the I/O node itself to complete the path.
                 wiring_paths[io_node] = {"path": full_path, "length": length}
         cdata["wiring_paths"] = wiring_paths
@@ -287,26 +292,33 @@ class ClusteringDijkstra:
         return candidates
 
     @profile_function
-    def _evaluate_candidate_cost(self, chassis: nx.Graph, candidate: Dict[str, Any],
-                                 attachment_nodes_in_cluster: List[str],
+    def _evaluate_candidate_cost(self, graph: nx.Graph, chassis: nx.Graph, candidate: Dict[str, Any],
+                                 io_nodes_in_cluster: List[str],
+                                 attachment_nodes_map: Dict[str, str],
                                  all_pairs_lengths: Dict) -> float:
         """
         Calculates the total wiring cost from a single candidate centroid to all nodes in a cluster.
         """
         total_cost = 0.0
-        # Case 1: The candidate is located directly on a chassis node.
-        if candidate["type"] == "node":
-            for attach_node in attachment_nodes_in_cluster:
-                total_cost += all_pairs_lengths.get(candidate["node"], {}).get(attach_node, float('inf'))
-        # Case 2: The candidate is located on an edge between two nodes.
-        elif candidate["type"] == "edge":
-            u, v, t = candidate["u"], candidate["v"], candidate["t"]
-            edge_len = chassis[u][v].get("weight", 1.0)
-            for attach_node in attachment_nodes_in_cluster:
+        for io_node in io_nodes_in_cluster:
+            attach_node = attachment_nodes_map[io_node]
+            cost_to_attach = 0.0
+            # Case 1: The candidate is located directly on a chassis node.
+            if candidate["type"] == "node":
+                cost_to_attach = all_pairs_lengths.get(candidate["node"], {}).get(attach_node, float('inf'))
+            # Case 2: The candidate is located on an edge between two nodes.
+            elif candidate["type"] == "edge":
+                u, v, t = candidate["u"], candidate["v"], candidate["t"]
+                edge_len = chassis[u][v].get("weight", 1.0)
                 # The path to the attachment node can go via either end of the edge.
                 cost_u = all_pairs_lengths.get(u, {}).get(attach_node, float('inf')) + t * edge_len
                 cost_v = all_pairs_lengths.get(v, {}).get(attach_node, float('inf')) + (1 - t) * edge_len
-                total_cost += min(cost_u, cost_v)
+                cost_to_attach = min(cost_u, cost_v)
+            
+            # Add distance from attachment node to I/O node
+            cost_from_attach_to_io = graph[attach_node][io_node].get("weight", 0.0)
+            total_cost += cost_to_attach + cost_from_attach_to_io
+            
         return total_cost
 
     @profile_function
@@ -347,16 +359,11 @@ class ClusteringDijkstra:
             return {"path": [], "total_length": 0.0}
 
         # Define which nodes are part of the bus network (chassis, extenders, and HPC).
-        def is_bus_node(node, data):
-            is_chassis = not any(node.startswith(p) for p in self.extender_prefixes) and \
-                         not any(node.startswith(p) for p in self.hpc_prefixes) and \
-                         not data.get("is_io")
-            return is_chassis or node in extender_nodes or node == hpc_node
-        bus_nodes = [n for n, d in graph.nodes(data=True) if is_bus_node(n, d)]
+        bus_nodes = [n for n, d in graph.nodes(data=True) if not d.get("is_io")]
         bus_graph = graph.subgraph(bus_nodes).copy()
 
         # Iteratively find the nearest extender and add it to the bus.
-        remaining_extenders = set(extender_nodes)
+        remaining_extenders = set(e for e in extender_nodes if e in bus_graph)
         can_bus_path = [hpc_node]
         total_can_length = 0.0
         current_node = hpc_node
