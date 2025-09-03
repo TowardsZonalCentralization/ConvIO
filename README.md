@@ -67,7 +67,7 @@ The optimization process is underpinned by several key algorithms and data struc
 
 *   **Greedy Nearest Neighbor Heuristic**:
     *   **Purpose:** To calculate a practical and efficient path for the CAN bus connecting all I/O extenders.
-    *   **Rationale:** Provides an excellent and fast approximation for connecting multiple points (a computationally hard problem like the Traveling Salesperson Problem). It constructs the path by iteratively traveling from the current point to the nearest unvisited I/O extender, ensuring a short and logical bus topology without excessive computation.
+    *   **Rationale:** Provides an excellent and fast approximation for connecting multiple points (a computationally hard problem like the Travelling Salesperson Problem). It constructs the path by iteratively traveling from the current point to the nearest unvisited I/O extender, ensuring a short and logical bus topology without excessive computation.
 
 ## Installation and Usage
 
