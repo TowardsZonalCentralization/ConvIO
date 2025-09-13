@@ -2,7 +2,7 @@
 
 ## Overview
 
-**CONVIO** (Computational Optimization for Vehicle I/O) is a specialized engineering tool designed to streamline and optimize the complex process of automotive wiring harness design. By leveraging advanced computational methods, CONVIO provides a robust platform for engineers to design, analyze, and refine wiring layouts with greater efficiency and precision.
+**CONVIO** (Convergence OfI/O) is a specialized engineering tool designed to streamline and optimize the complex process of automotive wiring harness design. By leveraging advanced computational methods, CONVIO provides a robust platform for engineers to design, analyze, and refine wiring layouts with greater efficiency and precision.
 
 The increasing complexity of modern vehicles, driven by advanced driver-assistance systems (ADAS), infotainment, and vehicle connectivity, has led to a proportional increase in the complexity of the automotive wiring harness. Traditional wiring architectures, which connect each component directly to a central computer, are becoming untenable due to weight, cost, and manufacturing challenges. The Zonal Electrical/Electronic (EE) Architecture with I/O Extender concept paradigm addresses these issues by decentralizing intelligence and I/O management into regional zones.
 
@@ -10,7 +10,7 @@ CONVIO models, analyzes, and optimizes such architectures, comparing them agains
 
 ## Core Capabilities
 
-*   **Graph-Based System Modeling:** Accurately models the vehicle chassis and I/O points as a weighted, undirected graph.
+*   **Graph-Based System Modeling:** Accurately models the vehicle chassis and I/O points as a weighted (Distance), undirected graph.
 *   **Automated Cluster Analysis:** Uses the elbow method to scientifically determine the optimal number of I/O clusters (zones).
 *   **Shortest-Path Optimization:** Implements Dijkstra's algorithm for efficient wiring path calculation within the chassis graph.
 *   **Zonal Architecture Optimization:** Employs Agglomerative Clustering and an iterative refinement process to group I/O points into optimal zones, minimizing wiring to I/O extenders.
@@ -29,6 +29,7 @@ The CONVIO application follows a sequential workflow to achieve optimal wiring h
     *   A separate CSV file with 2D coordinates of I/O devices is processed.
     *   Each I/O point is mapped onto the chassis graph, either by connecting to the nearest existing node or by projecting onto the closest edge, creating a new node.
     *   This results in a unified network graph for subsequent analysis.
+    *   The algorithm considers the special case of "Branch-out points" where it checks the distance of the I/O from the nearest node is less than the set threashold if not then it creates a Branch-out point from the wiring harness directly.
 
 2.  **Optimal Cluster Analysis (`elbow_method.py`)**:
     *   To determine the most efficient number of I/O Extenders (clusters) for the Zonal EE Architecture, a quantitative approach is employed.
