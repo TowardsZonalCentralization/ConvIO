@@ -207,6 +207,13 @@ node_definitions:
       size: 10
       symbol: "o"
       
+    Wire junction:
+      prefixes: ["W"]
+      description: "Wire junction points"
+      color: "#BD10E0"  # Purple
+      size: 10
+      symbol: "o"
+      
     hpc:
       prefixes: ["H"]
       description: "High Performance Computer nodes"  
@@ -224,7 +231,7 @@ node_definitions:
     sensor:
       prefixes: ["S"]
       description: "Sensor nodes"
-      color: "#BD10E0"  # Purple
+      color: "#BD10E8"  
       size: 6
       symbol: "t"
       
@@ -259,7 +266,7 @@ node_definitions:
   # Simple validation flags
   validation:
     warn_on_unknown_types: true
-    enforce_naming_convention: false  # More flexible
+    enforce_naming_convention: false 
 
 
 
