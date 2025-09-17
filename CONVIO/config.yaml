@@ -78,6 +78,7 @@ cost:
   currency: "EURO"
   wire_price_per_m: 1.5
   CAN_bus_price_per_m: 1.7
+  wire_weight_per_m_kg: 0.05 # 50g per meter
   
 # --------------------------
 # GUI and Visualization
@@ -266,7 +267,4 @@ node_definitions:
   # Simple validation flags
   validation:
     warn_on_unknown_types: true
-    enforce_naming_convention: false 
-
-
-
+    enforce_naming_convention: false

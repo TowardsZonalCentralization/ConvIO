@@ -325,11 +325,15 @@ class ReportGenerator:
             cluster_length = self.app.clustering_results.get("overall_wiring_harness_length", 0.0)
             if hpc_length > 0:
                 improvement = ((hpc_length - cluster_length) / hpc_length) * 100
+                hpc_weight = (hpc_length / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+                cluster_weight = (cluster_length / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+                weight_improvement = ((hpc_weight - cluster_weight) / hpc_weight) * 100 if hpc_weight > 0 else 0
+                
                 conc_text = (
                     f"The computational analysis confirms the viability and benefits of a Zonal EE Architecture. "
-                    f"The optimized model yielded a wiring reduction of {improvement:.1f}%, translating to "
-                    f"significant potential savings in material cost, weight, and manufacturing complexity."
-    
+                    f"The optimized model yielded a wiring reduction of {improvement:.1f}% in length and "
+                    f"{weight_improvement:.1f}% in weight, translating to significant potential savings in "
+                    f"material cost, weight, and manufacturing complexity."
                 )
         else:
             conc_text = "The analyses performed provide a foundational dataset for wiring harness optimization. To reach a definitive conclusion, all analytical steps, including baseline and zonal architecture calculations, must be completed to enable a comparative assessment."
@@ -416,10 +420,12 @@ class ReportGenerator:
     def _add_hpc_table(self):
         total_length = self.app.hpc_results.get("total_length", 0)
         cost = (total_length / 1000.0) * self.app.cost_cfg.get("wire_price_per_m", 0.0)
+        weight = (total_length / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0)
         data = [
             ["Metric", "Value"],
             ["Total Wiring Length", f"{total_length:.2f} mm ({total_length/1000:.2f} m)"],
             ["Estimated Wiring Cost", f"{cost:.2f} {self.app.cost_cfg.get('currency', '')}"],
+            ["Estimated Wiring Weight", f"{weight:.3f} kg"],
         ]
         table = Table(data, colWidths=[2.5*inch, 2.5*inch])
         table.setStyle(TableStyle([
@@ -467,21 +473,23 @@ class ReportGenerator:
         total_len = clustering_results.get("overall_wiring_harness_length", 0)
         wire_cost = (wire_len / 1000.0) * self.app.cost_cfg.get("wire_price_per_m", 0.0)
         can_cost = (can_len / 1000.0) * self.app.cost_cfg.get("CAN_bus_price_per_m", 0.0)
+        wire_weight = (wire_len / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+        can_weight = (can_len / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0) # Assuming CAN bus has same weight per meter
         currency = self.app.cost_cfg.get("currency", "")
         summary_data = [
-            ["Component", "Length (mm)", f"Cost ({currency})"],
-            ["I/O Wiring", f"{wire_len:.2f}", f"{wire_cost:.2f}"],
-            ["CAN Bus", f"{can_len:.2f}", f"{can_cost:.2f}"],
-            ["Total", f"{total_len:.2f}", f"{wire_cost + can_cost:.2f}"],
+            ["Component", "Length (mm)", f"Cost ({currency})", "Weight (kg)"],
+            ["I/O Wiring", f"{wire_len:.2f}", f"{wire_cost:.2f}", f"{wire_weight:.3f}"],
+            ["CAN Bus", f"{can_len:.2f}", f"{can_cost:.2f}", f"{can_weight:.3f}"],
+            ["Total", f"{total_len:.2f}", f"{wire_cost + can_cost:.2f}", f"{wire_weight + can_weight:.3f}"],
         ]
-        table = Table(summary_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
+        table = Table(summary_data, colWidths=[1.5*inch, 1.2*inch, 1.2*inch, 1.2*inch])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.darkgrey), ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('GRID', (0,0), (-1,-1), 1, colors.black),
         ]))
         self.story.append(table)
-        self.story.append(Paragraph(f"TABLE {self.tbl_counter}. ZONAL ARCHITECTURE COST & LENGTH SUMMARY", self.styles['Caption']))
+        self.story.append(Paragraph(f"TABLE {self.tbl_counter}. ZONAL ARCHITECTURE COST, LENGTH & WEIGHT SUMMARY", self.styles['Caption']))
         self.tbl_counter += 1
         self.story.append(Spacer(1, 0.2*inch))
 
@@ -579,16 +587,24 @@ class ReportGenerator:
     def _add_comparison_table(self):
         hpc_len = self.app.hpc_results.get("total_length", 0.0)
         hpc_cost = (hpc_len / 1000.0) * self.app.cost_cfg.get("wire_price_per_m", 0.0)
+        hpc_weight = (hpc_len / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+        
         zonal_len = self.app.clustering_results.get("overall_wiring_harness_length", 0.0)
         zonal_cost = ((self.app.clustering_results.get("total_wire_length", 0) / 1000.0) * self.app.cost_cfg.get("wire_price_per_m", 0.0)) + \
                      ((self.app.clustering_results.get("can_bus", {}).get("total_length", 0) / 1000.0) * self.app.cost_cfg.get("CAN_bus_price_per_m", 0.0))
+        zonal_weight = ((self.app.clustering_results.get("total_wire_length", 0) / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0)) + \
+                       ((self.app.clustering_results.get("can_bus", {}).get("total_length", 0) / 1000.0) * self.app.cost_cfg.get("wire_weight_per_m_kg", 0.0))
+        
         len_reduc = hpc_len - zonal_len
         cost_reduc = hpc_cost - zonal_cost
+        weight_reduc = hpc_weight - zonal_weight
+        
         currency = self.app.cost_cfg.get("currency", "")
         data = [
             ["Metric", "Direct HPC Wiring", "Zonal EEA", "Improvement"],
             ["Total Length (mm)", f"{hpc_len:.2f}", f"{zonal_len:.2f}", f"{len_reduc:.2f} ({ (len_reduc/hpc_len)*100 if hpc_len>0 else 0 :.1f}%)"],
             [f"Total Cost ({currency})", f"{hpc_cost:.2f}", f"{zonal_cost:.2f}", f"{cost_reduc:.2f} ({ (cost_reduc/hpc_cost)*100 if hpc_cost>0 else 0 :.1f}%)"],
+            ["Total Weight (kg)", f"{hpc_weight:.3f}", f"{zonal_weight:.3f}", f"{weight_reduc:.3f} ({ (weight_reduc/hpc_weight)*100 if hpc_weight>0 else 0 :.1f}%)"],
         ]
         table = Table(data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch], repeatRows=1)
         table.setStyle(TableStyle([

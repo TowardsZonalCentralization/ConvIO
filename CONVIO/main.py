@@ -439,6 +439,7 @@ class WiringHarnessOptimizer(QMainWindow):
             "currency": cost_cfg.get("currency", "EURO"),
             "wire_price_per_m": float(cost_cfg.get("wire_price_per_m", 0.0)),
             "CAN_bus_price_per_m": float(cost_cfg.get("CAN_bus_price_per_m", 0.0)),
+            "wire_weight_per_m_kg": float(cost_cfg.get("wire_weight_per_m_kg", 0.0)),
         }
 
     def _setup_reproducibility(self):
@@ -573,10 +574,12 @@ class WiringHarnessOptimizer(QMainWindow):
 
         self.hpc_total_label = QLabel("Overall Total Length: Not calculated")
         self.hpc_cost_label = QLabel("Cost: Not calculated")
+        self.hpc_weight_label = QLabel("Weight: Not calculated")
 
         hpc_layout.addWidget(self.hpc_btn)
         hpc_layout.addWidget(self.hpc_total_label)
         hpc_layout.addWidget(self.hpc_cost_label)
+        hpc_layout.addWidget(self.hpc_weight_label)
 
         layout.addWidget(hpc_group)
         
@@ -612,14 +615,33 @@ class WiringHarnessOptimizer(QMainWindow):
 
         self.clustering_cost_label = QLabel("Cost: Not calculated")
         cl_layout.addWidget(self.clustering_cost_label, 5, 0, 1, 2)
+        
+        self.clustering_weight_label = QLabel("Weight: Not calculated")
+        cl_layout.addWidget(self.clustering_weight_label, 6, 0, 1, 2)
 
         self.clustering_with_can_label = QLabel("Total with CAN FD: Not calculated")
-        cl_layout.addWidget(self.clustering_with_can_label, 6, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_with_can_label, 7, 0, 1, 2)
 
         self.clustering_with_can_cost_label = QLabel("Cost: Not calculated")
-        cl_layout.addWidget(self.clustering_with_can_cost_label, 7, 0, 1, 2)
+        cl_layout.addWidget(self.clustering_with_can_cost_label, 8, 0, 1, 2)
+
+        self.clustering_with_can_weight_label = QLabel("Weight: Not calculated")
+        cl_layout.addWidget(self.clustering_with_can_weight_label, 9, 0, 1, 2)
 
         layout.addWidget(cl_group)
+
+        # Comparison Results
+        comp_group = QGroupBox("Comparison Summary")
+        comp_layout = QVBoxLayout(comp_group)
+
+        self.comparison_length_saving_label = QLabel("Length Saving: Not calculated")
+        self.comparison_cost_saving_label = QLabel("Cost Saving: Not calculated")
+        self.comparison_weight_saving_label = QLabel("Weight Saving: Not calculated")
+
+        comp_layout.addWidget(self.comparison_length_saving_label)
+        comp_layout.addWidget(self.comparison_cost_saving_label)
+        comp_layout.addWidget(self.comparison_weight_saving_label)
+        layout.addWidget(comp_group)
 
         
 
@@ -632,16 +654,15 @@ class WiringHarnessOptimizer(QMainWindow):
         self.status_label = QLabel("Ready to start")
         layout.addWidget(self.status_label)
 
-        # Results/Log
-        results_group = QGroupBox("Results Summary")
-        rl = QVBoxLayout(results_group)
+        # Logging Display
+        log_group = QGroupBox("CONVIO Log")
+        log_layout = QVBoxLayout(log_group)
 
-        self.results_text = QTextEdit()
-        self.results_text.setReadOnly(True)
-        self.results_text.setMaximumHeight(200)
-        rl.addWidget(self.results_text)
-
-        layout.addWidget(results_group)
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMaximumHeight(200) 
+        log_layout.addWidget(self.log_text)
+        layout.addWidget(log_group)
 
         layout.addStretch()
         return panel
@@ -802,6 +823,8 @@ class WiringHarnessOptimizer(QMainWindow):
         self._finish_worker_task()
 
         self.optimal_clusters_label.setText(f"Optimal clusters: {optimal_k}")
+        self.log(f"Elbow analysis completed. Optimal clusters: {optimal_k}")
+        
         max_clusters = int(self.config.get("clustering.max_clusters_supported", 100))
         clamped_k = min(optimal_k, max_clusters)
         
@@ -845,17 +868,31 @@ class WiringHarnessOptimizer(QMainWindow):
 
             total_length = self.clustering_results.get("total_wire_length", 0.0)
             self.clustering_total_label.setText(f"Clustering Wiring Length: {total_length:.2f} mm")
+            
+            price_per_m = self.cost_cfg.get("wire_price_per_m", 0.0)
+            currency = self.cost_cfg.get("currency", "")
+            wire_weight_per_m_kg = self.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+
             cost_without_can = (total_length / 1000.0) * price_per_m
+            weight_without_can = (total_length / 1000.0) * wire_weight_per_m_kg
+            
             self.clustering_cost_label.setText(f"Cost: {cost_without_can:.2f} {currency}")
+            self.clustering_weight_label.setText(f"Weight: {weight_without_can:.3f} kg")
 
             total_with_can = self.clustering_results.get("overall_wiring_harness_length", 0.0)
             self.clustering_with_can_label.setText(f"Total with CAN FD: {total_with_can:.2f} mm")
             
             can_price_per_m = self.cost_cfg.get("CAN_bus_price_per_m", price_per_m)
             can_bus_length = total_with_can - total_length
+            can_price_per_m = self.cost_cfg.get("CAN_bus_price_per_m", price_per_m)
+            wire_weight_per_m_kg = self.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+            can_bus_length = total_with_can - total_length
             
             cost_with_can = ((total_length / 1000.0) * price_per_m) + ((can_bus_length / 1000.0) * can_price_per_m)
+            weight_with_can = ((total_length / 1000.0) * wire_weight_per_m_kg) + ((can_bus_length / 1000.0) * wire_weight_per_m_kg) # Assuming CAN bus has same weight per meter for now
+            
             self.clustering_with_can_cost_label.setText(f"Cost: {cost_with_can:.2f} {currency}")
+            self.clustering_with_can_weight_label.setText(f"Weight: {weight_with_can:.3f} kg")
 
         # Visualize clustering results and update comparison
         self._visualize_clustering_results(self.cluster_view, self.clustering_results)
@@ -875,8 +912,13 @@ class WiringHarnessOptimizer(QMainWindow):
 
             price_per_m = self.cost_cfg.get("wire_price_per_m", 0.0)
             currency = self.cost_cfg.get("currency", "")
+            wire_weight_per_m_kg = self.cost_cfg.get("wire_weight_per_m_kg", 0.0)
+            
             cost = (total_length / 1000.0) * price_per_m
+            weight = (total_length / 1000.0) * wire_weight_per_m_kg # Convert mm to m for weight calculation
+            
             self.hpc_cost_label.setText(f"Cost: {cost:.2f} {currency}")
+            self.hpc_weight_label.setText(f"Weight: {weight:.3f} kg")
             
             # Visualize HPC wiring
             self._visualize_hpc_wiring()
@@ -1311,13 +1353,30 @@ class WiringHarnessOptimizer(QMainWindow):
             self.log(f" Comparison: EEA with I/O Extenders vs. Overall Wiring")
             self.log(f"   Overall Wiring: {hpc_length:.2f} mm")
 
-            if cluster_length_without_can > 0:
-                improvement_without_can = ((hpc_length - cluster_length_without_can) / hpc_length) * 100
-                self.log(f"   Zonal EEA (without BUS): {cluster_length_without_can:.2f} mm -> Improvement: {improvement_without_can:.1f}%")
+            hpc_cost = (hpc_length / 1000.0) * self.cost_cfg.get("wire_price_per_m", 0.0)
+            hpc_weight = (hpc_length / 1000.0) * self.cost_cfg.get("wire_weight_per_m_kg", 0.0)
 
             if cluster_length_with_can > 0:
-                improvement_with_can = ((hpc_length - cluster_length_with_can) / hpc_length) * 100
-                self.log(f"   Zonal EEA (with BUS): {cluster_length_with_can:.2f} mm -> Improvement: {improvement_with_can:.1f}%")
+                cluster_cost = ((self.clustering_results.get("total_wire_length", 0) / 1000.0) * self.cost_cfg.get("wire_price_per_m", 0.0)) + \
+                               ((self.clustering_results.get("can_bus", {}).get("total_length", 0) / 1000.0) * self.cost_cfg.get("CAN_bus_price_per_m", 0.0))
+                cluster_weight = ((self.clustering_results.get("total_wire_length", 0) / 1000.0) * self.cost_cfg.get("wire_weight_per_m_kg", 0.0)) + \
+                                 ((self.clustering_results.get("can_bus", {}).get("total_length", 0) / 1000.0) * self.cost_cfg.get("wire_weight_per_m_kg", 0.0))
+
+                length_saving_percent = ((hpc_length - cluster_length_with_can) / hpc_length) * 100
+                cost_saving_percent = ((hpc_cost - cluster_cost) / hpc_cost) * 100 if hpc_cost > 0 else 0
+                weight_saving_percent = ((hpc_weight - cluster_weight) / hpc_weight) * 100 if hpc_weight > 0 else 0
+
+                self.comparison_length_saving_label.setText(f"Length Saving: {length_saving_percent:.1f}%")
+                self.comparison_cost_saving_label.setText(f"Cost Saving: {cost_saving_percent:.1f}%")
+                self.comparison_weight_saving_label.setText(f"Weight Saving: {weight_saving_percent:.1f}%")
+                
+                self.log(f"   Zonal EEA (with BUS): {cluster_length_with_can:.2f} mm -> Length Improvement: {length_saving_percent:.1f}%")
+                self.log(f"   Zonal EEA (with BUS): Cost Improvement: {cost_saving_percent:.1f}%")
+                self.log(f"   Zonal EEA (with BUS): Weight Improvement: {weight_saving_percent:.1f}%")
+            else:
+                self.comparison_length_saving_label.setText("Length Saving: N/A")
+                self.comparison_cost_saving_label.setText("Cost Saving: N/A")
+                self.comparison_weight_saving_label.setText("Weight Saving: N/A")
 
     # ==== FILE OPERATIONS ====
 
@@ -1462,10 +1521,10 @@ class WiringHarnessOptimizer(QMainWindow):
         )
 
     def log(self, message: str):
-        """Log message to results text and logger."""
+        """Log message to the log text display and logger."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         formatted_message = f"[{timestamp}] {message}"
-        self.results_text.append(formatted_message)
+        self.log_text.append(formatted_message)
         self.logger.info(message)
 
     def closeEvent(self, event):
