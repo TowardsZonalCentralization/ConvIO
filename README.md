@@ -56,7 +56,7 @@ The optimization process is underpinned by several key algorithms and data struc
 
 *   **K-Means Clustering**:
     *   **Purpose:** To provide a data-driven suggestion for the optimal number of clusters (k).
-    *   **Rationale:** A fast heuristic used in the 'elbow method' to analyze the spatial distribution of I/O nodes. By measuring the Within-Cluster Sum of Squares (WCSS) for a range of k values, it helps identify the point of diminishing returns, providing an objective recommendation for the number of zones.
+    *   **Rationale:** Provides a fast heuristic for analyzing the spatial distribution of nodes. The Within‑Cluster Sum of Squares (WCSS) is computed for a range of k values, with k‑means minimizing the squared Euclidean distances within each cluster. The elbow point, indicating diminishing returns in WCSS reduction, can guide the selection of the number of zones.
 
 *   **Dijkstra's Shortest Path Algorithm**:
     *   **Purpose:** To calculate the shortest path distances between nodes on the chassis graph.
@@ -64,7 +64,7 @@ The optimization process is underpinned by several key algorithms and data struc
 
 *   **Agglomerative Hierarchical Clustering**:
     *   **Purpose:** To perform the final, high-fidelity clustering of I/O nodes into zones.
-    *   **Rationale:** Operates on a precomputed distance matrix (true wiring distances from Dijkstra's algorithm), ensuring clusters are based on actual path lengths through the chassis, resulting in more practical and accurately optimized zones.
+    *   **Rationale:** Operates on a precomputed distance matrix (true wiring distances from Dijkstra's algorithm), ensuring clusters are based on actual path lengths, more specifically the Manhattan distances, through the chassis, resulting in more practical and accurately optimized zones.
 
 *   **Greedy Nearest Neighbor Heuristic**:
     *   **Purpose:** To calculate a practical and efficient path for the CAN bus connecting all I/O extenders.
