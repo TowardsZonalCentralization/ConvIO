@@ -21,6 +21,11 @@ The workflow is designed to be sequential:
 """
 
 import sys
+
+# Initialization of QApplication BEFORE QWidget is called
+from PyQt5.QtWidgets import QApplication
+app = QApplication(sys.argv)
+
 import os
 from typing import Optional, Dict, Any, Tuple, List
 import json
@@ -114,6 +119,13 @@ class ConfigManager:
     def _create_directories(self) -> None:
         """Create necessary directories from YAML."""
         paths = self.config["paths"]
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Adjust paths to be relative to the script's directory
+        paths["data_dir"] = os.path.join(script_dir, paths["data_dir"])
+        paths["export_dir"] = os.path.join(script_dir, paths["export_dir"])
+        paths["log_dir"] = os.path.join(script_dir, paths["log_dir"])
+
         for key in ["data_dir", "export_dir", "log_dir"]:
             path = paths.get(key)
             if path:
@@ -338,7 +350,7 @@ class ComparisonWindow(QDialog):
             wire_len = res.get("total_wire_length", 0.0)
             item_wire = QTableWidgetItem(f"{wire_len:.2f}")
             
-            # CAN Bus
+            # Communication Network Bus
             can_len = res.get("can_bus", {}).get("total_length", 0.0)
             item_can = QTableWidgetItem(f"{can_len:.2f}")
             
@@ -689,8 +701,8 @@ class WiringHarnessOptimizer(QMainWindow):
         
         # Clustering Results
         self.cluster_view = pg.PlotWidget()
-        self._setup_pg_view(self.cluster_view, 'EEA with I/O extenders')
-        self.tab_widget.addTab(self.cluster_view, "EEA with I/O extenders")
+        self._setup_pg_view(self.cluster_view, 'EEA with I/O aggregators')
+        self.tab_widget.addTab(self.cluster_view, "EEA with I/O aggregators")
 
         
 
@@ -1038,7 +1050,7 @@ class WiringHarnessOptimizer(QMainWindow):
             wiring_paths = cluster_data.get("wiring_paths", {})
             
             is_can_bus = cluster_id == "can_bus"
-            path_name = "CAN Bus Path" if is_can_bus else f"Cluster {i} Wiring"
+            path_name = "Communication Network Bus Path" if is_can_bus else f"Cluster {i} Wiring"
             
             for io_node, path_data in wiring_paths.items():
                 path = path_data.get("path", [])
@@ -1057,7 +1069,7 @@ class WiringHarnessOptimizer(QMainWindow):
                             pg.PlotCurveItem(xs, ys, pen=pg.mkPen(color, width=2.5, style=Qt.DashLine), name=current_path_name)
                         )
 
-            # Draw I/O extender (centroid) node and its label
+            # Draw I/O aggregator (centroid) node and its label
             if centroid_info and "pos" in centroid_info and not is_can_bus:
                 cx, cy = centroid_info["pos"]
                 view.addItem(
@@ -1069,7 +1081,7 @@ class WiringHarnessOptimizer(QMainWindow):
                         pen=pg.mkPen('k', width=1.5)
                     )
                 )
-                label = pg.TextItem(f"I/O Extender {cluster_id.split('_')[-1]}", color=(0,0,0), anchor=(0.5, -1.0))
+                label = pg.TextItem(f"I/O Aggregator {cluster_id.split('_')[-1]}", color=(0,0,0), anchor=(0.5, -1.0))
                 label.setPos(cx, cy)
                 view.addItem(label)
 
@@ -1350,7 +1362,7 @@ class WiringHarnessOptimizer(QMainWindow):
         hpc_length = self.hpc_results.get("total_length", 0.0)
 
         if hpc_length > 0:
-            self.log(f" Comparison: EEA with I/O Extenders vs. Overall Wiring")
+            self.log(f" Comparison: EEA with I/O Aggregator vs. Overall Wiring")
             self.log(f"   Overall Wiring: {hpc_length:.2f} mm")
 
             hpc_cost = (hpc_length / 1000.0) * self.cost_cfg.get("wire_price_per_m", 0.0)
@@ -1535,7 +1547,7 @@ class WiringHarnessOptimizer(QMainWindow):
 
 def main():
     """Main application entry point."""
-    app = QApplication(sys.argv)
+    # app = QApplication(sys.argv)
     
     try:
         config_manager = ConfigManager()

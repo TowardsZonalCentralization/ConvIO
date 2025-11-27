@@ -140,7 +140,7 @@ class ReportGenerator:
             "<b><i>This report presents a computational analysis for the optimization of automotive "
             "wiring harnesses. A graph-based representation of a vehicle chassis is utilized to compare a "
             "traditional point-to-point wiring architecture against a modern Zonal Electrical/Electronic (EE) "
-            "Architecture with I/O Extenders Concept. The methodology employs Agglomerative Clustering on a precomputed graph-distance matrix, "
+            "Architecture with I/O aggregators Concept. The methodology employs Agglomerative Clustering on a precomputed graph-distance matrix, "
             "informed by the elbow method, to group Input/Output (I/O) points into optimal zones. Dijkstra's algorithm "
             "is then used to calculate the shortest wiring paths. Quantitative results, including total wire length "
             "and estimated cost, are presented to evaluate the efficacy of the zonal approach. </i></b>"
@@ -156,7 +156,7 @@ class ReportGenerator:
             "infotainment, and vehicle connectivity, has led to a proportional increase in the complexity of "
             "the automotive wiring harness. Traditional wiring architectures, which connect each component directly "
             "to a central computer, are becoming untenable due to weight, cost, and manufacturing challenges. "
-            "The Zonal EE Architecture with I/O Extender concept paradigm addresses these issues by decentralizing intelligence and I/O "
+            "The Zonal EE Architecture with I/O aggregator concept paradigm addresses these issues by decentralizing intelligence and I/O "
             "management into regional zones. This report documents the process and results of a software tool, "
             "CONVIO, designed to model, analyze, and optimize such architectures."
         )
@@ -186,10 +186,10 @@ class ReportGenerator:
         self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Optimal Cluster Analysis (`elbow_method.py`)", self.styles["h2"]))
         sub_sec += 1
         method_text = (
-            "To determine the most efficient number of I/O Extenders (clusters) for the Zonal EE Architecture, a quantitative approach is employed. "
+            "To determine the most efficient number of I/O aggregators (clusters) for the Zonal EE Architecture, a quantitative approach is employed. "
             "The `elbow_method` module applies the K-Means clustering algorithm specifically to the 2D spatial data of the I/O nodes for a range of cluster counts (k). "
             "It calculates the Within-Cluster Sum of Squares (WCSS) for each k. The 'elbow point'—the point on the WCSS curve where the rate of decrease sharply "
-            "changes—is identified as a data-driven suggestion for the optimal number of clusters. This balances harness simplification against the number of required I/O extenders."
+            "changes—is identified as a data-driven suggestion for the optimal number of clusters. This balances harness simplification against the number of required I/O aggregators."
         )
         self.story.append(Paragraph(method_text, self.styles['Justify']))
         self.story.append(Spacer(1, 0.1*inch))
@@ -201,7 +201,7 @@ class ReportGenerator:
             "With the optimal number of clusters determined, the `clustering_dijkstra` module executes a sophisticated two-stage optimization. "
             "<b>First</b>, it constructs a distance matrix representing the true shortest-path distance within the chassis graph between every pair of I/O nodes. "
             "Using this matrix, it performs an initial partitioning of the I/O nodes using Agglomerative Clustering to establish a strong baseline grouping. "
-            "<b>Second</b>, it enters a refinement phase. For each initial cluster, an optimal I/O extender location (centroid) is calculated. The algorithm then iteratively re-assigns each I/O node to the zone with the closest centroid, ensuring that the final groupings are not just based on I/O-to-I/O proximity, but on the more critical I/O-to-extender wiring distance. This process repeats until the cluster memberships stabilize, guaranteeing a more logically and efficiently partitioned zonal architecture."
+            "<b>Second</b>, it enters a refinement phase. For each initial cluster, an optimal I/O aggregator location (centroid) is calculated. The algorithm then iteratively re-assigns each I/O node to the zone with the closest centroid, ensuring that the final groupings are not just based on I/O-to-I/O proximity, but on the more critical I/O-to-aggregator wiring distance. This process repeats until the cluster memberships stabilize, guaranteeing a more logically and efficiently partitioned zonal architecture."
         )
         self.story.append(Paragraph(method_text, self.styles['Justify']))
         self.story.append(Spacer(1, 0.1*inch))
@@ -267,8 +267,8 @@ class ReportGenerator:
         self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Greedy Nearest Neighbor Heuristic", self.styles["h2"]))
         sub_sec += 1
         self.story.append(Paragraph("<b>Algorithm:</b> Greedy Nearest Neighbor", self.styles['BodyText']))
-        self.story.append(Paragraph("<b>Purpose:</b> To calculate a practical and efficient path for the CAN bus connecting all I/O extenders.", self.styles['BodyText']))
-        self.story.append(Paragraph("<b>Why:</b> Finding the absolute shortest path to connect multiple points is a computationally hard problem (Traveling Salesperson Problem). A greedy nearest neighbor heuristic provides an excellent and fast approximation. It constructs the path by iteratively traveling from the current point to the nearest unvisited I/O extender, ensuring a short and logical bus topology without excessive computation.", self.styles['Justify']))
+        self.story.append(Paragraph("<b>Purpose:</b> To calculate a practical and efficient path for the CAN bus connecting all I/O aggregators.", self.styles['BodyText']))
+        self.story.append(Paragraph("<b>Why:</b> Finding the absolute shortest path to connect multiple points is a computationally hard problem (Traveling Salesperson Problem). A greedy nearest neighbor heuristic provides an excellent and fast approximation. It constructs the path by iteratively traveling from the current point to the nearest unvisited I/O aggregator, ensuring a short and logical bus topology without excessive computation.", self.styles['Justify']))
 
         self.sec_counter += 1
         self.story.append(PageBreak())
@@ -303,7 +303,7 @@ class ReportGenerator:
 
         # Optimized Architecture
         if self.app.clustering_results:
-            self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Optimized Zonal Architecture with I/O Extenders Analysis", self.styles["h2"]))
+            self.story.append(Paragraph(f"{self.sec_counter}.{sub_sec} Optimized Zonal Architecture with I/O aggregators Analysis", self.styles["h2"]))
             sub_sec += 1
             self._add_clustering_tables()
             # The main figure will be of the best result if available, otherwise the manual run
@@ -399,12 +399,12 @@ class ReportGenerator:
 
     def _add_clustering_figure(self):
         """Adds the Zonal EEA visualization to the report."""
-        title = "Optimized Zonal EEA with I/O Extenders"
+        title = "Optimized Zonal EEA with I/O aggregators"
         if self.app.comparison_results:
             best_method = self.app.comparison_results.get("best_method", "N/A")
             title = f"Optimized Zonal EEA (Recommended Method: '{best_method}')"
 
-        self.story.append(Paragraph(f"The visualization of the optimized Zonal EE Architecture is shown in Fig. {self.fig_counter}. I/O nodes are color-coded by cluster, with wiring paths shown to their respective I/O Extenders (centroids).", self.styles["Justify"]))
+        self.story.append(Paragraph(f"The visualization of the optimized Zonal EE Architecture is shown in Fig. {self.fig_counter}. I/O nodes are color-coded by cluster, with wiring paths shown to their respective I/O aggregators (centroids).", self.styles["Justify"]))
         try:
             image_bytes = self.app._export_plot_to_image_bytes(self.app.cluster_view)
             img_buffer = io.BytesIO(image_bytes)

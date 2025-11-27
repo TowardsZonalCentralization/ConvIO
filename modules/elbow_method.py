@@ -5,7 +5,7 @@ Elbow Method for finding optimum number of clusters using K-Means
 This module provides the `ElbowMethodAnalyzer` class, which is used to
 determine the optimal number of clusters for a given set of I/O nodes. This is
 a crucial step before the main clustering algorithm runs, as it provides a
-data-driven suggestion for the number of I/O extenders needed.
+data-driven suggestion for the number of I/O aggregators needed.
 
 The workflow is as follows:
 1.  Extract the 2D coordinates of all I/O nodes from the input graph.
@@ -130,14 +130,9 @@ class ElbowMethodAnalyzer:
         coords = []
         for n in io_nodes:
             pos = graph.nodes[n].get("pos")
-            if not pos or len(pos) < 3: # Check for 3D coordinates
-                # If Z is missing, default to 0.0 for backward compatibility with 2D data
-                if len(pos) == 2:
-                    coords.append([float(pos[0]), float(pos[1]), 0.0])
-                else:
-                    raise ValueError(f"I/O node '{n}' is missing a valid 'pos' attribute (expected 2D or 3D).")
-            else:
-                coords.append([float(pos[0]), float(pos[1]), float(pos[2])])
+            if not pos or len(pos) < 2:
+                raise ValueError(f"I/O node '{n}' is missing a valid 'pos' attribute.")
+            coords.append([float(pos[0]), float(pos[1])])
         
         X = np.array(coords, dtype=float)
         io_count = X.shape[0]

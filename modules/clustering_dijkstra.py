@@ -4,20 +4,20 @@ Clustering & finding shortest path with Dijkstra
 
 This module provides the `ClusteringDijkstra` class, which is responsible for
 grouping I/O nodes into clusters and finding the optimal placement for I/O
-extenders (centroids) within a chassis graph. It also includes functionality
-to calculate a CAN bus path connecting these extenders to a High-Performance
+aggregators (centroids) within a chassis graph. It also includes functionality
+to calculate a communication network bus path connecting these aggregators to a High-Performance
 Computer (HPC).
 
 The process involves these main steps:
 1.  Clustering: I/O nodes are clustered based on their graph distance
     from each other.
 2.  Centroid Optimization: For each cluster, the optimal location for an
-    I/O extender is found by evaluating candidate points on chassis nodes and
+    I/O aggregator is found by evaluating candidate points on chassis nodes and
     edges, The threshold value can be set in configuration file.
-3.  CAN Bus Calculation: A shortest path is calculated to connect the HPC
-    to all newly placed I/O extenders in a bus topology.
+3.  Communication Network Calculation: A shortest path is calculated to connect the HPC
+    to all newly placed I/O aggregators in a bus topology.
 4.  Output Generation: The results, including cluster data, wiring paths,
-    and the CAN bus path, are compiled and exported to a JSON file.
+    and the communication network path, are compiled and exported to a JSON file.
 """
 
 from typing import Dict, Any, List, Tuple, Optional
@@ -82,7 +82,7 @@ def profile_function(func):
 
 class ClusteringDijkstra:
     """
-    Orchestrates the clustering of I/O nodes and optimization of extender placements.
+    Orchestrates the clustering of I/O nodes and optimization of aggregator placements.
     """
     @profile_function
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -106,7 +106,7 @@ class ClusteringDijkstra:
         self.edge_sample_step = float(self.clustering_config.get("edge_sample_step", 0.25))
         self.include_node_candidates = bool(self.clustering_config.get("include_node_candidates", True))
 
-        # Load node definitions to dynamically identify HPC and extender nodes.
+        # Load node definitions to dynamically identify HPC and aggregator nodes.
         node_cfg = self.config.get("node_definitions", {})
         self.node_types = node_cfg.get("node_types", {})
 
@@ -115,9 +115,9 @@ class ClusteringDijkstra:
         self.hpc_prefixes = self.node_types.get(hpc_type, {}).get("prefixes", ["HPC_", "H_"])
         self.configured_hpc_name = self.config.get("node_configuration", {}).get("hpc_node_name")
 
-        # Get prefixes for I/O extenders to support custom naming schemes.
-        extender_type = next((t for t, d in self.node_types.items() if d.get("is_extender")), "extender")
-        self.extender_prefixes = self.node_types.get(extender_type, {}).get("prefixes", ["EXT_"])
+        # Get prefixes for I/O aggregators to support custom naming schemes.
+        aggregator_type = next((t for t, d in self.node_types.items() if d.get("is_aggregator")), "aggregator")
+        self.aggregator_prefixes = self.node_types.get(aggregator_type, {}).get("prefixes", ["EXT_"])
 
     def _find_hpc_node(self, graph: nx.Graph) -> Optional[str]:
         """
@@ -189,7 +189,7 @@ class ClusteringDijkstra:
         self.logger.info("Refining cluster assignments based on optimal centroids...")
         clusters = self._refine_cluster_assignments(graph, chassis, clusters, all_pairs_lengths)
 
-        # Step 5: For each FINAL cluster, find the optimal extender location and calculate wire lengths.
+        # Step 5: For each FINAL cluster, find the optimal aggregator location and calculate wire lengths.
         total_wire_length = 0.0
         for cid, cdata in clusters.items():
             if not cdata["io_nodes"]:  # Skip empty clusters that may result from refinement
@@ -234,7 +234,7 @@ class ClusteringDijkstra:
     def _find_optimal_centroid(self, graph: nx.Graph, chassis: nx.Graph,
                                io_nodes_in_cluster: List[str],
                                all_pairs_lengths: Dict) -> Optional[Dict[str, Any]]:
-        """Finds the single best candidate location for an extender for a given set of I/O nodes."""
+        """Finds the single best candidate location for an aggregator for a given set of I/O nodes."""
         if not io_nodes_in_cluster:
             return None
 
@@ -303,7 +303,7 @@ class ClusteringDijkstra:
 
     @profile_function
     def _process_single_cluster(self, graph: nx.Graph, chassis: nx.Graph,
-                              pos: Dict[str, Tuple[float, float, float]], # Updated to 3D
+                              pos: Dict[str, Tuple[float, float]],
                               cid: str, cdata: Dict[str, Any],
                               all_pairs_lengths: Dict[Any, Any]) -> float:
         """
@@ -341,7 +341,7 @@ class ClusteringDijkstra:
         return best_cost
 
     @profile_function
-    def _generate_candidates(self, chassis: nx.Graph, pos: Dict[str, Tuple[float, float, float]]) -> List[Dict[str, Any]]:
+    def _generate_candidates(self, chassis: nx.Graph, pos: Dict[str, Tuple[float, float]]) -> List[Dict[str, Any]]:
         """
         Generates candidate locations for centroids, including chassis nodes and points along edges.
         """
@@ -417,50 +417,50 @@ class ClusteringDijkstra:
         return [], float('inf')
 
     @profile_function
-    def _calculate_can_bus_path(self, graph: nx.Graph, hpc_node: str, extender_nodes: List[str]) -> Dict[str, Any]:
+    def _calculate_can_bus_path(self, graph: nx.Graph, hpc_node: str, aggregator_nodes: List[str]) -> Dict[str, Any]:
         """
-        Calculates the shortest CAN bus path connecting the HPC to all I/O extenders.
+        Calculates the shortest CAN bus path connecting the HPC to all I/O aggregators.
         This uses a greedy approach (nearest neighbor), finding the next closest
-        extender from the last point in the path.
+        aggregator from the last point in the path.
         """
         if not hpc_node or hpc_node not in graph:
             self.logger.warning(f"HPC  '{hpc_node}' not found for CAN bus calculation.")
             return {"path": [], "total_length": 0.0}
-        if not extender_nodes:
+        if not aggregator_nodes:
             return {"path": [], "total_length": 0.0}
 
-        # Define which nodes are part of the bus network (chassis, extenders, and HPC).
+        # Define which nodes are part of the bus network (chassis, aggregators, and HPC).
         bus_nodes = [n for n, d in graph.nodes(data=True) if not d.get("is_io")]
         bus_graph = graph.subgraph(bus_nodes).copy()
 
-        # Iteratively find the nearest extender and add it to the bus.
-        remaining_extenders = set(e for e in extender_nodes if e in bus_graph)
+        # Iteratively find the nearest aggregator and add it to the bus.
+        remaining_aggregators = set(e for e in aggregator_nodes if e in bus_graph)
         can_bus_path = [hpc_node]
         total_can_length = 0.0
         current_node = hpc_node
-        while remaining_extenders:
+        while remaining_aggregators:
             shortest_dist = float('inf')
             best_path = []
-            next_extender = None
+            next_aggregator = None
 
-            # Find the closest extender from the current end of the bus.
-            for extender in remaining_extenders:
+            # Find the closest aggregator from the current end of the bus.
+            for aggregator in remaining_aggregators:
                 try:
-                    length, path = nx.single_source_dijkstra(bus_graph, source=current_node, target=extender, weight="weight")
+                    length, path = nx.single_source_dijkstra(bus_graph, source=current_node, target=aggregator, weight="weight")
                     if length < shortest_dist:
-                        shortest_dist, best_path, next_extender = length, path, extender
+                        shortest_dist, best_path, next_aggregator = length, path, aggregator
                 except nx.NetworkXNoPath:
                     continue
             
             # If a path is found, add it to our main CAN bus path.
-            if next_extender:
+            if next_aggregator:
                 can_bus_path.extend(best_path[1:])  # Exclude the first node to avoid duplicates.
                 total_can_length += shortest_dist
-                current_node = next_extender
-                remaining_extenders.remove(next_extender)
+                current_node = next_aggregator
+                remaining_aggregators.remove(next_aggregator)
             else:
-                # This case occurs if some extenders are on disconnected parts of the graph.
-                self.logger.error("Could not find a path to all I/O extenders for CAN bus.")
+                # This case occurs if some aggregators are on disconnected parts of the graph.
+                self.logger.error("Could not find a path to all I/O aggregators for CAN bus.")
                 break
         
         return {"path": can_bus_path, "total_length": total_can_length}
@@ -477,33 +477,33 @@ class ClusteringDijkstra:
             # Error is logged within the find method. Return an error state.
             return {"clusters": {}, "total_wire_length": 0.0, "output_path": None, "error": "HPC node not found"}
 
-        # Create and connect I/O extender nodes in the output graph.
+        # Create and connect I/O aggregator nodes in the output graph.
         for cluster_id, cluster_data in clusters.items():
             centroid = cluster_data.get("centroid")
             if not centroid: continue
             
-            extender_prefix = self.extender_prefixes[0] if self.extender_prefixes else "EXT_"
-            extender_id = f"{extender_prefix}{cluster_id.split('_')[-1]}"
-            G_out.add_node(extender_id, pos=centroid["pos"], type="extender", is_io=False)
+            aggregator_prefix = self.aggregator_prefixes[0] if self.aggregator_prefixes else "EXT_"
+            aggregator_id = f"{aggregator_prefix}{cluster_id.split('_')[-1]}"
+            G_out.add_node(aggregator_id, pos=centroid["pos"], type="aggregator", is_io=False)
 
-            # Connect the new extender node to the chassis graph to make it routable.
+            # Connect the new aggregator node to the chassis graph to make it routable.
             if centroid["type"] == "node":
-                G_out.add_edge(extender_id, centroid["node"], weight=0)
+                G_out.add_edge(aggregator_id, centroid["node"], weight=0)
             elif centroid["type"] == "edge":
                 u, v, t = centroid["u"], centroid["v"], centroid["t"]
                 edge_len = original_graph.edges[u, v].get("weight", 1.0)
-                G_out.add_edge(extender_id, u, weight=t * edge_len)
-                G_out.add_edge(extender_id, v, weight=(1 - t) * edge_len)
+                G_out.add_edge(aggregator_id, u, weight=t * edge_len)
+                G_out.add_edge(aggregator_id, v, weight=(1 - t) * edge_len)
 
-            # Add edges representing the optimized wiring from the extender to its I/O nodes.
+            # Add edges representing the optimized wiring from the aggregator to its I/O nodes.
             for io_node, path_data in cluster_data.get("wiring_paths", {}).items():
-                G_out.add_edge(extender_id, io_node, weight=path_data.get("length", 0.0), edge_type="optimized_wire")
+                G_out.add_edge(aggregator_id, io_node, weight=path_data.get("length", 0.0), edge_type="optimized_wire")
         
-        # Now that extenders are in the graph, calculate the CAN bus path.
-        extender_nodes = [n for n in G_out.nodes() if any(n.startswith(p) for p in self.extender_prefixes)]
-        can_bus_results = self._calculate_can_bus_path(G_out, hpc_node_name, extender_nodes)
+        # Now that aggregators are in the graph, calculate the communication network bus path.
+        aggregator_nodes = [n for n in G_out.nodes() if any(n.startswith(p) for p in self.aggregator_prefixes)]
+        can_bus_results = self._calculate_can_bus_path(G_out, hpc_node_name, aggregator_nodes)
 
-        # For visualization purposes, format the CAN bus path as a pseudo-cluster.
+        # For visualization purposes, format the communication network bus path as a pseudo-cluster.
         if can_bus_results and can_bus_results["path"] and hpc_node_name in G_out:
             can_path = can_bus_results["path"]
             if len(can_path) > 1:

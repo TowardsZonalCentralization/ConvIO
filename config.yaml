@@ -9,7 +9,7 @@
 paths:
   data_dir: "./data" # Default location for chassis/IO input data
   export_dir: "./export" # Where to save output/results/reports
-  default_chassis_json: "./data/Truck.json"
+  default_chassis_json: "./data/truck.json"
   default_io_csv: "./data/exemplary_IO_coordinates.csv"
   log_dir: "./logs"
   log_file: "./logs/optimizer.log"
@@ -29,8 +29,6 @@ graph_loader:
   input_coordinate_units: "mm" # Future: change to "inches" if needed
   skip_self_loops: true
  
-
-
   
 # --------------------------
 # Elbow Method
@@ -78,6 +76,7 @@ cost:
   currency: "EURO"
   wire_price_per_m: 1.5
   CAN_bus_price_per_m: 1.7
+  wire_weight_per_m_kg: 0.05 # 50g per meter
   
 # --------------------------
 # GUI and Visualization
@@ -96,10 +95,6 @@ gui:
   figure_dpi: 120
   enable_fullscreen: false
   window_size: [1500, 900]
-  3d_view_elevation: 30 # Default elevation for 3D view
-  3d_view_azimuth: 45 # Default azimuth for 3D view
-  3d_background_color: "white" # New: Background color for 3D view (e.g., "white", "black", "#RRGGBB")
-  3d_node_size_multiplier: 10 # New: Multiplier for scaling 2D node size to 3D object size
   
 # --------------------------
 # Output and Reporting
@@ -125,7 +120,7 @@ units:
 # --------------------------
 
 logging:
-  level: "DEBUG" # DEBUG | INFO | WARNING | ERROR
+  level: "INFO" # DEBUG | INFO | WARNING | ERROR
   enable_log_to_file: true
   enable_log_to_console: true
   max_log_size_mb: 10
@@ -182,6 +177,17 @@ reproducibility:
 
 
   
+# Node Type Definitions - Keep it Simple!
+#SYMBOL_MAP supported by pyqtgraph = 
+    #"circle": "o",
+    #"square": "s",
+    #"triangle": "t",
+    #"diamond": "d",
+    #"cross": "+",
+    #"plus": "+",
+    #"x": "x",
+    #"star": "star",  
+    #"hexagon": "h",   
 
 # --------------------------
 # Node Configuration
@@ -198,84 +204,65 @@ node_definitions:
       description: "Chassis junction points"
       color: "#4A90E2"  # Blue
       size: 10
-      shape_3d: "sphere"
+      symbol: "o"
       
     Wire junction:
       prefixes: ["W"]
       description: "Wire junction points"
       color: "#BD10E0"  # Purple
       size: 10
-      shape_3d: "sphere"
+      symbol: "o"
       
     hpc:
       prefixes: ["H"]
       description: "High Performance Computer nodes"  
       color: "#50E3C2"  # Green
       size: 16
-      shape_3d: "sphere"
+      symbol: "d"
       
     io:  
       prefixes: ["I"]
       description: "Input/Output nodes"
       color: "#F5A623"  # Orange
       size: 5
-      shape_3d: "sphere"
+      symbol: "o"
       
     sensor:
       prefixes: ["S"]
       description: "Sensor nodes"
       color: "#BD10E8"  
       size: 6
-      shape_3d: "sphere"
+      symbol: "t"
       
     actuator:
       prefixes: ["A"]
       description: "Actuator nodes"
       color: "#B8E986"  # Light green
       size: 10
-      shape_3d: "sphere"
+      symbol: "t"
       
     power:
       prefixes: ["P"]
       description: "Power distribution nodes"
       color: "#D0021B"  # Red
       size: 14
-      shape_3d: "sphere"
+      symbol: "+"
       
-    io_extender:
+    io_aggregator:
       prefixes: ["E"]
-      description: "I/O Extender nodes"
+      description: "I/O Aggregator nodes"
       color: "#7ED321"  # Bright green
       size: 12
-      shape_3d: "box"
+      symbol: "s"
 
   # Fallback for unrecognized nodes
   default_node:
     color: "#9B9B9B"  # Gray
     size: 6
-    shape_3d: "sphere"
+    symbol: "+"
     description: "Unknown node type"
-
-  # Definitions for wiring/edge types
-  wiring_types:
-    chassis_wiring:
-      description: "Chassis Wiring"
-      color: "#000000" # Black
-      width: 1
-    cluster_wiring:
-      description: "Cluster Wiring"
-      color: "#808080" # Dark Gray
-      width: 2.5
-    hpc_wiring:
-      description: "HPC Wiring"
-      color: "#FF0000" # Red
-      width: 3
-    can_bus:
-      description: "CAN Bus"
-      color: "#FF0000" # Red
-      width: 2.5 # Assuming CAN bus is also a type of wiring
 
   # Simple validation flags
   validation:
     warn_on_unknown_types: true
-    enforce_naming_convention: false  # More flexible
+    enforce_naming_convention: false
