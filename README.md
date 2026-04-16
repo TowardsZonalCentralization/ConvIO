@@ -8,6 +8,16 @@ The increasing complexity of modern vehicles, driven by advanced driver-assistan
 
 CONVIO models, analyzes, and optimizes such architectures, comparing them against traditional direct-to-HPC (High-Performance Computer) wiring to demonstrate the benefits of a zonal approach.
 
+## How to Run
+Download suitable prebuilt executable from one of the releases [here](https://github.com/TowardsZonalCentralization/ConvIO/releases).
+
+Or build locally:
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+
 ## Core Capabilities
 
 *   **Graph-Based System Modeling:** Accurately models the vehicle chassis and I/O points as a weighted (distance), undirected graph.
