@@ -52,6 +52,7 @@ jobs:
         mkdir dist\CONVIO\data
         mkdir dist\CONVIO\export
         mkdir dist\CONVIO\logs
+        Copy-Item -Path data\* -Destination dist\CONVIO\data\ -Recurse
         Compress-Archive -Path dist\CONVIO\* -DestinationPath ${{ matrix.artifact_name }}.zip
 
     - name: Prepare Release Folder (Linux/macOS)
@@ -61,6 +62,7 @@ jobs:
         mkdir -p dist/CONVIO/data
         mkdir -p dist/CONVIO/export
         mkdir -p dist/CONVIO/logs
+        cp -r data dist/CONVIO/
         # Use macOS/Linux native tar command to preserve executable permissions
         cd dist/CONVIO && tar -czvf ../../${{ matrix.artifact_name }}.tar.gz * && cd ../..
 

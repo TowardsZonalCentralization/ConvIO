@@ -61,9 +61,18 @@ class ConfigManager:
     Manages application configuration from config.yaml (YAML-first, single source).
     """
     def __init__(self, config_path: str = None):
+        if getattr(sys, 'frozen', False):
+            # Running as a PyInstaller executable
+            self.base_dir = os.path.dirname(sys.executable)
+        else:
+            # Running from normal Python script
+            self.base_dir = os.path.dirname(os.path.abspath(__file__))
+
         if config_path is None:
-            config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
-        self.config_path = config_path
+            self.config_path = os.path.join(self.base_dir, "config.yaml")
+        else:
+            self.config_path = config_path
+
         self.config = self._load_config_yaml_only()
         self._setup_logging()
         self._create_directories()
@@ -119,12 +128,11 @@ class ConfigManager:
     def _create_directories(self) -> None:
         """Create necessary directories from YAML."""
         paths = self.config["paths"]
-        script_dir = os.path.dirname(os.path.abspath(__file__))
 
-        # Adjust paths to be relative to the script's directory
-        paths["data_dir"] = os.path.join(script_dir, paths["data_dir"])
-        paths["export_dir"] = os.path.join(script_dir, paths["export_dir"])
-        paths["log_dir"] = os.path.join(script_dir, paths["log_dir"])
+        # Use self.base_dir instead of __file__ so folders generate next to the .exe
+        paths["data_dir"] = os.path.join(self.base_dir, paths.get("data_dir", "./data"))
+        paths["export_dir"] = os.path.join(self.base_dir, paths.get("export_dir", "./export"))
+        paths["log_dir"] = os.path.join(self.base_dir, paths.get("log_dir", "./logs"))
 
         for key in ["data_dir", "export_dir", "log_dir"]:
             path = paths.get(key)
