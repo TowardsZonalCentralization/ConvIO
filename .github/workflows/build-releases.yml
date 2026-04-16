@@ -1,0 +1,72 @@
+name: Build Release Binaries
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: CONVIO-Windows
+            archive_ext: zip
+            executable: CONVIO.exe
+          - os: ubuntu-latest
+            artifact_name: CONVIO-Linux
+            archive_ext: tar.gz
+            executable: CONVIO
+          - os: macos-latest
+            artifact_name: CONVIO-macOS
+            archive_ext: tar.gz
+            executable: CONVIO
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --noconfirm --windowed --onedir --name CONVIO main.py
+
+    - name: Prepare Release Folder (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        copy config.yaml dist\CONVIO\
+        mkdir dist\CONVIO\data
+        mkdir dist\CONVIO\export
+        mkdir dist\CONVIO\logs
+        Compress-Archive -Path dist\CONVIO\* -DestinationPath ${{ matrix.artifact_name }}.zip
+
+    - name: Prepare Release Folder (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: |
+        cp config.yaml dist/CONVIO/
+        mkdir -p dist/CONVIO/data
+        mkdir -p dist/CONVIO/export
+        mkdir -p dist/CONVIO/logs
+        # Use macOS/Linux native tar command to preserve executable permissions
+        cd dist/CONVIO && tar -czvf ../../${{ matrix.artifact_name }}.tar.gz * && cd ../..
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+        retention-days: 7
