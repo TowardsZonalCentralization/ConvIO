@@ -1,8 +1,9 @@
-name: Build Release Binaries
+name: Build and Publish Release
 
 on:
   push:
-    branches: [ "main" ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -15,15 +16,12 @@ jobs:
           - os: windows-latest
             artifact_name: CONVIO-Windows
             archive_ext: zip
-            executable: CONVIO.exe
           - os: ubuntu-latest
             artifact_name: CONVIO-Linux
             archive_ext: tar.gz
-            executable: CONVIO
           - os: macos-latest
             artifact_name: CONVIO-macOS
             archive_ext: tar.gz
-            executable: CONVIO
 
     steps:
     - name: Checkout Code
@@ -63,12 +61,12 @@ jobs:
         mkdir -p dist/CONVIO/export
         mkdir -p dist/CONVIO/logs
         cp -r data dist/CONVIO/
-        # Use macOS/Linux native tar command to preserve executable permissions
         cd dist/CONVIO && tar -czvf ../../${{ matrix.artifact_name }}.tar.gz * && cd ../..
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+    # NEW STEP: Upload directly to the GitHub Release associated with the tag
+    - name: Upload to GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
-        name: ${{ matrix.artifact_name }}
-        path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
-        retention-days: 7
+        files: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
