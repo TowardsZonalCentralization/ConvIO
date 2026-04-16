@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
@@ -60,7 +63,7 @@ jobs:
         mkdir -p dist/CONVIO/data
         mkdir -p dist/CONVIO/export
         mkdir -p dist/CONVIO/logs
-        cp -r data dist/CONVIO/
+        cp -r data/* dist/CONVIO/
         cd dist/CONVIO && tar -czvf ../../${{ matrix.artifact_name }}.tar.gz * && cd ../..
 
     # NEW STEP: Upload directly to the GitHub Release associated with the tag
