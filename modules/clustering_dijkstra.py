@@ -152,7 +152,9 @@ class ClusteringDijkstra:
         return None
     
     @profile_function
-    def cluster_and_optimize(self, graph: nx.Graph, n_clusters: int, linkage_method: str = 'complete') -> Dict[str, Any]:
+    def cluster_and_optimize(self, graph: nx.Graph, n_clusters: int,
+                              linkage_method: str = 'complete',
+                              refine: bool = True) -> Dict[str, Any]:
         """
         Executes the full clustering and optimization workflow.
 
@@ -160,6 +162,10 @@ class ClusteringDijkstra:
             graph: The input graph containing chassis and I/O nodes.
             n_clusters: The desired number of clusters to create.
             linkage_method: The linkage criterion to use ('complete', 'average', 'single').
+            refine: If True (default), run the k-means-like reassignment loop after
+                    initial agglomerative clustering. Set to False to compare pure
+                    linkage-method output — otherwise all three linkages converge to
+                    the same partition regardless of seeding.
 
         Returns:
             A dictionary containing the complete results, including cluster
@@ -180,14 +186,18 @@ class ClusteringDijkstra:
         # Step 3: Group I/O nodes into clusters.
         self.logger.info(f"Starting clustering with k={k} and linkage='{linkage_method}'...")
         labels = self._cluster_by_graph_distance(chassis, io_nodes, io_attachment_map, k, linkage_method)
-        clusters = {f"cluster_{i}": {"io_nodes": []} for i in range(k)}
+        clusters = {f"cluster_{i + 1}": {"io_nodes": []} for i in range(k)}
         for i, node in enumerate(io_nodes):
-            clusters[f"cluster_{labels[i]}"]["io_nodes"].append(node)
+            cluster_id = f"cluster_{labels[i] + 1}"
+            clusters[cluster_id]["io_nodes"].append(node)
 
-        # Step 4: Refine the initial clusters by re-assigning I/Os to their closest centroids.
+        # Step 4: (optional) Refine clusters by re-assigning I/Os to closest centroids.
         all_pairs_lengths = dict(nx.all_pairs_dijkstra_path_length(chassis, weight="weight"))
-        self.logger.info("Refining cluster assignments based on optimal centroids...")
-        clusters = self._refine_cluster_assignments(graph, chassis, clusters, all_pairs_lengths)
+        if refine:
+            self.logger.info("Refining cluster assignments based on optimal centroids...")
+            clusters = self._refine_cluster_assignments(graph, chassis, clusters, all_pairs_lengths)
+        else:
+            self.logger.info("Skipping refinement (refine=False) — reporting pure linkage output.")
 
         # Step 5: For each FINAL cluster, find the optimal aggregator location and calculate wire lengths.
         total_wire_length = 0.0
@@ -199,6 +209,162 @@ class ClusteringDijkstra:
 
         # Step 6: Format and export the final results.
         return self._format_and_export_output(graph, clusters, total_wire_length)
+
+    def cluster_initial(self, graph: nx.Graph, n_clusters: int, linkage_method: str = 'complete') -> Dict[str, Any]:
+        """
+        GUI Step 3 - Agglomerative clustering only, no centroid optimisation.
+
+        Returns raw cluster memberships so the visualization layer can colour
+        I/O nodes by cluster without drawing paths or centroids.
+        """
+        io_nodes = [n for n, d in graph.nodes(data=True) if d.get("is_io", False)]
+        if not io_nodes:
+            self.logger.warning("No I/O nodes found. Aborting initial clustering.")
+            return {"clusters": {}, "io_nodes": []}
+
+        k = min(n_clusters, len(io_nodes))
+        chassis = self._get_chassis_subgraph(graph)
+        io_attachment_map = self._infer_attachment_nodes(graph, io_nodes)
+
+        self.logger.info(f"Initial agglomerative clustering: k={k}, linkage='{linkage_method}'")
+        labels = self._cluster_by_graph_distance(chassis, io_nodes, io_attachment_map, k, linkage_method)
+
+        clusters: Dict[str, Any] = {f"cluster_{i + 1}": {"io_nodes": []} for i in range(k)}
+        for node, label in zip(io_nodes, labels):
+            cluster_id = f"cluster_{int(label) + 1}"
+            clusters[cluster_id]["io_nodes"].append(node)
+
+        return {"clusters": clusters, "io_nodes": io_nodes}
+
+    def cluster_and_optimize_iterative(
+        self, graph: nx.Graph, n_clusters: int,
+        linkage_method: str = 'complete', max_iterations: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        GUI Step 4 - Full pipeline with per-iteration convergence tracking.
+
+        The returned dict includes an ``iteration_results`` list used to
+        populate the Step 4 iteration table in the GUI:
+          [{"iteration": int, "assignments_changed": int, "total_wire_length": float}, ...]
+        """
+        io_nodes = [n for n, d in graph.nodes(data=True) if d.get("is_io", False)]
+        if not io_nodes:
+            return {"clusters": {}, "total_wire_length": 0.0, "iteration_results": [], "output_path": None}
+
+        k = min(n_clusters, len(io_nodes))
+        chassis = self._get_chassis_subgraph(graph)
+        pos = {n: chassis.nodes[n]["pos"] for n in chassis.nodes()}
+        io_attachment_map = self._infer_attachment_nodes(graph, io_nodes)
+
+        # Initial clustering
+        labels = self._cluster_by_graph_distance(chassis, io_nodes, io_attachment_map, k, linkage_method)
+        clusters: Dict[str, Any] = {f"cluster_{i + 1}": {"io_nodes": []} for i in range(k)}
+        for node, label in zip(io_nodes, labels):
+            cluster_id = f"cluster_{int(label) + 1}"
+            clusters[cluster_id]["io_nodes"].append(node)
+
+        all_pairs_lengths = dict(nx.all_pairs_dijkstra_path_length(chassis, weight="weight"))
+
+        # Baseline cost — agglomerative clustering output before any centroid
+        # optimisation. Used so the iter-1 delta is meaningful (it shows how
+        # much the first reassignment improves on the raw linkage assignment).
+        baseline_centroids = {}
+        baseline_total = 0.0
+        for cid, cdata in clusters.items():
+            if not cdata["io_nodes"]:
+                continue
+            c = self._find_optimal_centroid(graph, chassis, cdata["io_nodes"], all_pairs_lengths)
+            baseline_centroids[cid] = c
+            if c:
+                attachment = self._infer_attachment_nodes(graph, cdata["io_nodes"])
+                baseline_total += self._evaluate_candidate_cost(
+                    graph, chassis, c, cdata["io_nodes"], attachment, all_pairs_lengths,
+                )
+
+        # ── Iterative centroid refinement ─────────────────────────────────
+        # At each iteration:
+        #   1. Compute optimal centroids for the current assignments
+        #   2. Reassign each I/O to the nearest centroid
+        #   3. Record the cost of the *new* assignments under the *new*
+        #      centroids (i.e. the post-reassignment state)
+        #
+        # This makes the reported wire length and assignments_changed columns
+        # tell a consistent story: when assignments stabilise, the cost stops
+        # changing too. Reporting cost mid-iteration (with old assignments and
+        # new centroids) leads to the confusing "0 changes but length differs"
+        # case the user reported.
+        iteration_results = []
+        prev_total = baseline_total  # iter-1 delta is relative to baseline
+        for iteration in range(max_iterations):
+            self.logger.info(f"Centroid optimisation iteration {iteration + 1}/{max_iterations}...")
+
+            # Step 1: optimal centroid for each cluster's current members
+            centroids: Dict[str, Any] = {}
+            for cid, cdata in clusters.items():
+                if not cdata["io_nodes"]:
+                    continue
+                centroids[cid] = self._find_optimal_centroid(
+                    graph, chassis, cdata["io_nodes"], all_pairs_lengths,
+                )
+
+            # Step 2: reassign each I/O to the nearest centroid
+            assignments_changed = 0
+            all_io = [n for cdata in clusters.values() for n in cdata["io_nodes"]]
+            for io_node in all_io:
+                current_cid = next(
+                    (cid for cid, cdata in clusters.items() if io_node in cdata["io_nodes"]), None,
+                )
+                min_dist, best_cid = float("inf"), None
+                attachment_node = self._infer_attachment_nodes(graph, [io_node])[io_node]
+                for cid, centroid in centroids.items():
+                    if not centroid:
+                        continue
+                    _, length = self._get_path_and_length_from_centroid(chassis, centroid, attachment_node)
+                    total_dist = length + graph[attachment_node][io_node].get("weight", 0.0)
+                    if total_dist < min_dist:
+                        min_dist, best_cid = total_dist, cid
+                if best_cid and best_cid != current_cid:
+                    clusters[current_cid]["io_nodes"].remove(io_node)
+                    clusters[best_cid]["io_nodes"].append(io_node)
+                    assignments_changed += 1
+
+            # Step 3: cost of the new state (post-reassignment, current centroids)
+            total_wire_this_iter = 0.0
+            for cid, cdata in clusters.items():
+                if not cdata["io_nodes"] or not centroids.get(cid):
+                    continue
+                attachment = self._infer_attachment_nodes(graph, cdata["io_nodes"])
+                total_wire_this_iter += self._evaluate_candidate_cost(
+                    graph, chassis, centroids[cid], cdata["io_nodes"],
+                    attachment, all_pairs_lengths,
+                )
+
+            delta = total_wire_this_iter - prev_total
+            iteration_results.append({
+                "iteration":           iteration + 1,
+                "assignments_changed": assignments_changed,
+                "total_wire_length":   round(total_wire_this_iter, 2),
+                "delta_vs_previous":   round(delta, 2),
+            })
+            prev_total = total_wire_this_iter
+
+            if assignments_changed == 0:
+                self.logger.info(f"Assignments stabilised at iteration {iteration + 1}.")
+                break
+
+        # Final pass: compute wiring paths and export
+        total_wire_length = 0.0
+        for cid, cdata in clusters.items():
+            if not cdata["io_nodes"]:
+                continue
+            total_wire_length += self._process_single_cluster(
+                graph, chassis, pos, cid, cdata, all_pairs_lengths,
+            )
+
+        result = self._format_and_export_output(graph, clusters, total_wire_length)
+        result["iteration_results"] = iteration_results
+        result["baseline_wire_length"] = round(baseline_total, 2)
+        return result
 
     # --- Helper Methods for Graph Preparation ---
 

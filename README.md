@@ -25,7 +25,7 @@ python main.py
 *   **Shortest-Path Optimization:** Implements Dijkstra's algorithm for efficient wiring path calculation within the chassis graph.
 *   **Zonal Architecture Optimization:** Employs Agglomerative Clustering and an iterative refinement process to group I/O points into optimal zones, minimizing wiring to I/O aggregators.
 *   **Baseline Architecture Analysis:** Calculates the total wiring length for a traditional direct-to-HPC architecture for comparative benchmarking.
-*   **Comparative Analysis:** Benchmarks optimized zonal architectures against traditional direct-to-HPC wiring, providing quantitative improvements in length and cost.
+*   **Comparative Analysis:** Benchmarks optimised zonal architectures against traditional direct-to-HPC wiring, providing quantitative improvements in length and cost.
 *   **Insightful Reporting:** Generates comprehensive PDF reports and visualizations to support design decisions.
 *   **Configurable Workflow:** The entire workflow is controlled through a clear and concise YAML configuration (`config.yaml`), ensuring adaptability and reproducibility.
 
@@ -74,7 +74,7 @@ The optimization process is underpinned by several key algorithms and data struc
 
 *   **Agglomerative Hierarchical Clustering**:
     *   **Purpose:** To perform the final, high-fidelity clustering of I/O nodes into zones.
-    *   **Rationale:** Operates on a precomputed distance matrix (true wiring distances from Dijkstra's algorithm), ensuring clusters are based on actual path lengths, more specifically the Manhattan distances, through the chassis, resulting in more practical and accurately optimized zones.
+    *   **Rationale:** Operates on a precomputed distance matrix (true wiring distances from Dijkstra's algorithm), ensuring clusters are based on actual path lengths, more specifically the Manhattan distances, through the chassis, resulting in more practical and accurately optimised zones.
 
 *   **Greedy Nearest Neighbor Heuristic**:
     *   **Purpose:** To calculate a practical and efficient path for the CAN bus connecting all I/O aggregators.
@@ -132,28 +132,42 @@ python main.py
 ### Workflow Steps in the GUI
 
 1.  **Load Data Files (Step 1)**:
-    *   Click "Load Chassis Graph (JSON)" to select your chassis definition file.
-    *   Click "Load I/O Coordinates (CSV)" to select your I/O points file.
+    *   Click "Open Chassis JSON..." to select your chassis definition file.
+    *   Click "Open I/O CSV..." to select your I/O points file.
     *   Alternatively, click "Load Default Files" to load pre-configured files from `config.yaml`.
-    *   Once both files are loaded, click "Process Graph" to build the network model. The "Network Graph" tab will display the loaded chassis and I/O points.
+    *   Once both files are loaded, click "Build Network Graph" to build the network model. The "Network Graph" tab will display the loaded chassis and I/O points.
 
 2.  **Find Optimal Clusters (Step 2)**:
     *   Click "Run Elbow Method Analysis" to determine the optimal number of clusters for your I/O points.
     *   The "Elbow Analysis" tab will display the WCSS curve, and the "Optimal clusters" label will update with the recommended `k` value. This value will also pre-fill the "Number of Clusters" spin box.
 
-3.  **Overall Wiring Analysis (Step 3)**:
-    *   Click "Calculate Overall Wiring" to compute the total wiring length and cost for the baseline direct-to-HPC architecture.
-    *   Results will be displayed in the control panel, and the "Overall Wiring" tab will visualize the direct connections.
+    **Baseline Wiring Analysis**:
+    *   Click "Calculate Baseline Wiring" to compute the total wiring length and cost for the baseline direct-to-HPC architecture.
+    *   Results will be displayed in the control panel, and the "Baseline Wiring" tab will visualize the direct connections.
 
-4.  **Clustering & Optimization (Step 4)**:
+3.  **Final Clustering (Step 3)**:
     *   Adjust the "Number of Clusters" (pre-filled from elbow method or manually set) and select a "Linkage Method" (`average`, `complete`, `single`).
-    *   Click "Run Clustering & Optimization" to perform the zonal optimization for the selected method.
-    *   Alternatively, click "Run Full Analysis & Compare" to run the optimization with all linkage methods and get a comparison table, with the best method automatically selected for visualization.
-    *   The "EEA with I/O aggregators" tab will display the optimized zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
+    *   Click "Run Clustering" to perform agglomerative hierarchical clustering for the selected linkage method using chassis path-based distances.
+    *   Alternatively, click "Compae All Linkage Methods" to run the optimization with all linkage methods and get a comparison table, with the best method automatically selected for visualization.
+    *   The clustering assigns I/O nodes to physically meaningful zones based on wiring-relevant distances rather than purely geometric proximity.
+    *   The "Initial Clustering" tab will display the optimised zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
     *   Detailed length and cost metrics for the zonal architecture will be updated in the control panel.
 
-### Exporting Results
+4. **Centroid Optimization (Step 4)**:
+    * Click "Run Iterative Optimisation" to refine each cluster by relocating the I/O aggregator to the centroid candidate with the lowest intra-zone wiring cost.
+    * Candidate positions are evaluated using precomputed chassis path lengths and final connections to the I/O nodes.
+    * The optimization iterates until convergence or until the user-defined maximum number of iterations is reached.
+    * The "Centroid Optimisation" tab will display the optimised zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
 
+5. **Communication Topology Generation (Step 5)**:
+    * Click "Run Communication Network" to connect the HPC with the optimised I/O aggregators and the supported communication topologies.
+    * Supported topologies include `bus`, `redundant bus`, and `star ring`.
+    * The resulting architecture is visualised in the "Bus Topology", "Redundant Bus", and "Star and Ring" tabs, including clusters, I/O aggregators, wiring paths, and communication links.
+    * Detailed length and cost metrics are updated in the control panel.
+    
+### Final Results
+
+*   **Architecture Comparison Summary**: The final results are displayed in the "Results" tab.
 *   **Export Results (JSON)**: From the `File` menu, select `Export Results (JSON)...` to save all analysis data (clustering, HPC, elbow, configuration) to a JSON file.
 *   **Export Report (PDF)**: From the `File` menu, select `Export Report (PDF)...` to generate a comprehensive PDF report detailing the methodology, algorithmic framework, results, and comparative analysis, including all relevant figures and tables.
 

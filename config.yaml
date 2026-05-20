@@ -7,163 +7,81 @@
 # --------------------------
 
 paths:
-  data_dir: "./data" # Default location for chassis/IO input data
-  export_dir: "./export" # Where to save output/results/reports
+  data_dir: "./data"                                    # Default location for chassis/IO input data
+  export_dir: "./export"                                # Where to save output/results/reports
   default_chassis_json: "./data/truck.json"
   default_io_csv: "./data/exemplary_IO_coordinates.csv"
   log_dir: "./logs"
   log_file: "./logs/optimizer.log"
-  config_file: "./config.yaml"
-  allow_file_overwrite: false # Disallow accidental overwrite of existing exports
 
 # --------------------------
 # Graph Loader
 # --------------------------
 
 graph_loader:
-  min_direct_node_distance_mm: 2000.0 # [mm] If IO is <= this from node: direct connect, else project to edge
-  allow_projection_on_edge: true # If false, disables IO-to-edge logic entirely (legacy fallback)
-  allowed_io_formats: ["csv"]
-  allowed_chassis_formats: ["json"]
-  max_projection_nodes_per_io: 2 # Limit splits per IO for very large graphs
-  input_coordinate_units: "mm" # Future: change to "inches" if needed
+  min_direct_node_distance_mm: 2000.0     # [mm] If IO is <= this from node: direct connect, else project to edge
+  allow_projection_on_edge: true          # If false, disables IO-to-edge logic entirely (legacy fallback)
   skip_self_loops: true
- 
-  
+
 # --------------------------
 # Elbow Method
 # --------------------------
 
 elbow_method:
   k_min: 1
-  k_max: 12 # Will be capped to number of IO points
-  n_init: 10 # KMeans restarts for stability
-  random_state: 42 # For reproducibility
-  elbow_detection_method: "knee" # "knee"=max distance to line, "manual"=always manual_k
-  manual_k_override: null # Set integer to override; stays null for auto
-  warn_on_unusual_elbow: true # Show message if unclear elbow found
-  compute_silhouette: false # Optional: compute silhouette for k (slower)
+  k_max: 12                               # Will be capped to number of IO points
+  n_init: 10                              # KMeans restarts for stability
+  random_state: 42                        # For reproducibility
 
 # --------------------------
 # Clustering & Dijkstra
 # --------------------------
 
 clustering:
-  random_state: 42
-  n_init: 10
-  distance_metric: "graph" # "graph" or "euclidean"
-  clustering_method: "agglomerative" # "agglomerative" or "kmeans"
   max_clusters_supported: 100
-  parallel_clustering_enabled: false
-  prefer_edge_hub_on_tie: true
-  unreachable_component_policy: "warn_skip"
-  validate_cluster_coherence: true
-  max_cluster_x_range: 4000.0
-  max_cluster_y_range: 1500.0
-  
+
   # Centroid Optimizer Settings (integrated)
-  edge_sample_step: 0.25 # 0.1=very fine, 0.25=faster, 0.5=coarse
-  include_node_candidates: true # Consider chassis nodes as centroid options
-  use_geomedian_projections: true # Project geometric median onto edges as candidates
-  max_geomedian_iters: 50
-  geomedian_tol: 1e-4
+  edge_sample_step: 0.25                  # 0.1=very fine, 0.25=faster, 0.5=coarse
+  include_node_candidates: true           # Consider chassis nodes as centroid options
 
 # --------------------------
-# Cost / Business Calculation (GUI)
+# Cost / Business Calculation
 # --------------------------
 
 cost:
   currency: "EURO"
   wire_price_per_m: 1.5
   CAN_bus_price_per_m: 1.7
-  wire_weight_per_m_kg: 0.05 # 50g per meter
-  
+  wire_weight_per_m_kg: 0.05              # 50g per meter
+
 # --------------------------
 # GUI and Visualization
 # --------------------------
 
 gui:
-  theme: "light"
-  show_grid: true
-  font: "Arial"
-  highlight_selected_cluster: true
-  tab_colormap: "Set3"
+  window_size: [1500, 900]
   color_palette:
     [ "#8dd3c7", "#ffffb3", "#bebada", "#fb8072",
       "#80b1d3", "#fdb462", "#b3de69", "#fccde5",
       "#d9d9d9", "#bc80bd", "#ccebc5", "#ffed6f" ]
-  figure_dpi: 120
-  enable_fullscreen: false
-  window_size: [1500, 900]
-  
-# --------------------------
-# Output and Reporting
-# --------------------------
-
-output:
-  report_format: ["json", "pdf"]
-  include_diagnostics: true
-  save_paths_and_wiring_tables: true
-  plot_resolution_dpi: 160
-  auto_open_output_dir: true
-  filename_pattern: "{project}_{stage}_{timestamp}" # File naming policy
-  
-# --------------------------
-# Units
-# --------------------------
-
-units:
-  length: "mm" # Length units for user-facing output (mm/m/inches)
 
 # --------------------------
 # Logging
 # --------------------------
 
 logging:
-  level: "INFO" # DEBUG | INFO | WARNING | ERROR
+  level: "INFO"                           # DEBUG | INFO | WARNING | ERROR
   enable_log_to_file: true
   enable_log_to_console: true
-  max_log_size_mb: 10
-  log_rotate: true
-  verbose_exceptions: true
   fmt: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
   datefmt: "%H:%M:%S"
 
 # --------------------------
-# Error Handling and General
+# Error Handling
 # --------------------------
 
 error_handling:
-  ask_retry_on_minor_errors: true
-  raise_on_major_errors: true
   log_stack_trace_on_error: true
-  gui_show_warnings: true
-  batch_mode_continue_on_error: false
-  fail_quietly_on_bad_files: false
-
-
-# --------------------------
-# Profiling
-# --------------------------
-
-profiling:
-  enabled: true
-  stages: ["load_graph", "elbow_analysis", "clustering", "optimize_centroids"]
-  backend: "cprofile" # "cprofile" | "pyinstrument" | "tracemalloc" | "none"
-  output_dir: "./profiling"
-  filename_pattern: "{stage}_{timestamp}"
-  cprofile:
-    sort_by: "cumtime" # "cumtime" | "tottime" | "ncalls"
-    restrict: 60 # Top-N lines in text report
-    dump_raw: true # Write .prof file for external tools
-    emit_text_report: true # Write .txt summary alongside .prof
-  pyinstrument:
-    html_report: true # Write .html flamegraph
-    text_report: false # Optionally write text summary
-  tracemalloc:
-    enable: false # Set backend to "tracemalloc" to use
-    top_n: 30
-    snapshot_diff: false
 
 # --------------------------
 # Reproducibility
@@ -172,29 +90,26 @@ profiling:
 reproducibility:
   set_global_seeds: true
   numpy_seed: 42
-  sklearn_seed: 42
-  deterministic_graph_ops: false # Keep false unless you need strict determinism
 
 
-  
 # Node Type Definitions - Keep it Simple!
-#SYMBOL_MAP supported by pyqtgraph = 
-    #"circle": "o",
-    #"square": "s",
-    #"triangle": "t",
-    #"diamond": "d",
-    #"cross": "+",
-    #"plus": "+",
-    #"x": "x",
-    #"star": "star",  
-    #"hexagon": "h",   
+# SYMBOL_MAP supported by pyqtgraph =
+#     "circle":   "o",
+#     "square":   "s",
+#     "triangle": "t",
+#     "diamond":  "d",
+#     "cross":    "+",
+#     "plus":     "+",
+#     "x":        "x",
+#     "star":     "star",
+#     "hexagon":  "h",
 
 # --------------------------
 # Node Configuration
 # --------------------------
 
 node_configuration:
-  hpc_node_name: "H1" # Identifier for the High-Performance Computer node
+  hpc_node_name: "H1"                     # Identifier for the High-Performance Computer node
 
 node_definitions:
   # Node type mapping based on prefixes
@@ -202,67 +117,62 @@ node_definitions:
     junction:
       prefixes: ["J"]
       description: "Chassis junction points"
-      color: "#4A90E2"  # Blue
+      color: "#4A90E2"                    # Blue
       size: 10
       symbol: "o"
-      
+
     Wire junction:
       prefixes: ["W"]
       description: "Wire junction points"
-      color: "#BD10E0"  # Purple
+      color: "#BD10E0"                    # Purple
       size: 10
       symbol: "o"
-      
+
     hpc:
       prefixes: ["H"]
-      description: "High Performance Computer nodes"  
-      color: "#50E3C2"  # Green
+      description: "High Performance Computer nodes"
+      color: "#50E3C2"                    # Green
       size: 16
       symbol: "d"
-      
-    io:  
+
+    io:
       prefixes: ["I"]
       description: "Input/Output nodes"
-      color: "#F5A623"  # Orange
+      color: "#F5A623"                    # Orange
       size: 5
       symbol: "o"
-      
+
     sensor:
       prefixes: ["S"]
       description: "Sensor nodes"
-      color: "#BD10E8"  
+      color: "#BD10E8"
       size: 6
       symbol: "t"
-      
+
     actuator:
       prefixes: ["A"]
       description: "Actuator nodes"
-      color: "#B8E986"  # Light green
+      color: "#B8E986"                    # Light green
       size: 10
       symbol: "t"
-      
+
     power:
       prefixes: ["P"]
       description: "Power distribution nodes"
-      color: "#D0021B"  # Red
+      color: "#D0021B"                    # Red
       size: 14
       symbol: "+"
-      
+
     io_aggregator:
       prefixes: ["E"]
       description: "I/O Aggregator nodes"
-      color: "#7ED321"  # Bright green
+      color: "#7ED321"                    # Bright green
       size: 12
       symbol: "s"
 
   # Fallback for unrecognized nodes
   default_node:
-    color: "#9B9B9B"  # Gray
+    color: "#9B9B9B"                      # Gray
     size: 6
     symbol: "+"
     description: "Unknown node type"
-
-  # Simple validation flags
-  validation:
-    warn_on_unknown_types: true
-    enforce_naming_convention: false
