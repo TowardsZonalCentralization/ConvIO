@@ -1,12 +1,12 @@
-# CONVIO: Automotive Wiring Harness Optimizer
+# ConvIO: Automotive Wiring Harness Optimizer
 
 ## Overview
 
-**CONVIO** (Convergence of I/O) is a specialized engineering tool designed to streamline and optimize the complex process of automotive wiring harness design. By leveraging advanced computational methods, CONVIO provides a robust platform for engineers to design, analyze, and refine wiring layouts with greater efficiency and precision.
+**ConvIO** (Convergence of I/O) is a specialized engineering tool designed to streamline and optimize the complex process of automotive wiring harness design. By leveraging advanced computational methods, CONVIO provides a robust platform for engineers to design, analyze, and refine wiring layouts with greater efficiency and precision.
 
 The increasing complexity of modern vehicles, driven by advanced driver-assistance systems (ADAS), infotainment, and vehicle connectivity, has led to a proportional increase in the complexity of the automotive wiring harness. Traditional wiring architectures, which connect each component directly to a central computer, are becoming untenable due to weight, cost, and manufacturing challenges. The Zonal Electrical/Electronic (EE) Architecture with I/O aggregator concept paradigm addresses these issues by decentralizing intelligence and I/O management into regional zones.
 
-CONVIO models, analyzes, and optimizes such architectures, comparing them against traditional direct-to-HPC (High-Performance Computer) wiring to demonstrate the benefits of a zonal approach.
+ConvIO models, analyzes, and optimizes such architectures, comparing them against traditional direct-to-HPC (High-Performance Computer) wiring to demonstrate the benefits of a zonal approach.
 
 ## How to Run
 Download suitable prebuilt executable from one of the releases [here](https://github.com/TowardsZonalCentralization/ConvIO/releases).
@@ -25,13 +25,13 @@ python main.py
 *   **Shortest-Path Optimization:** Implements Dijkstra's algorithm for efficient wiring path calculation within the chassis graph.
 *   **Zonal Architecture Optimization:** Employs Agglomerative Clustering and an iterative refinement process to group I/O points into optimal zones, minimizing wiring to I/O aggregators.
 *   **Baseline Architecture Analysis:** Calculates the total wiring length for a traditional direct-to-HPC architecture for comparative benchmarking.
-*   **Comparative Analysis:** Benchmarks optimised zonal architectures against traditional direct-to-HPC wiring, providing quantitative improvements in length and cost.
+*   **Comparative Analysis:** Benchmarks optimized zonal architectures against traditional direct-to-HPC wiring, providing quantitative improvements in length and cost.
 *   **Insightful Reporting:** Generates comprehensive PDF reports and visualizations to support design decisions.
 *   **Configurable Workflow:** The entire workflow is controlled through a clear and concise YAML configuration (`config.yaml`), ensuring adaptability and reproducibility.
 
 ## Methodology
 
-The CONVIO application follows a sequential workflow to achieve optimal wiring harness designs:
+The ConvIO application follows a sequential workflow to achieve optimal wiring harness designs:
 
 1.  **System Modeling (`graph_loader.py`)**:
     *   The physical structure of the vehicle is translated into a computational model.
@@ -74,7 +74,7 @@ The optimization process is underpinned by several key algorithms and data struc
 
 *   **Agglomerative Hierarchical Clustering**:
     *   **Purpose:** To perform the final, high-fidelity clustering of I/O nodes into zones.
-    *   **Rationale:** Operates on a precomputed distance matrix (true wiring distances from Dijkstra's algorithm), ensuring clusters are based on actual path lengths, more specifically the Manhattan distances, through the chassis, resulting in more practical and accurately optimised zones.
+    *   **Rationale:** Operates on a precomputed distance matrix (true wiring distances from Dijkstra's algorithm), ensuring clusters are based on actual path lengths, more specifically the Manhattan distances, through the chassis, resulting in more practical and accurately optimized zones.
 
 *   **Greedy Nearest Neighbor Heuristic**:
     *   **Purpose:** To calculate a practical and efficient path for the CAN bus connecting all I/O aggregators.
@@ -107,7 +107,7 @@ The optimization process is underpinned by several key algorithms and data struc
 
 ### Configuration
 
-The application's behavior is controlled by the `config.yaml` file located in the `CONVIO/` directory. This file allows you to specify:
+The application's behavior is controlled by the `config.yaml` file located in the `ConvIO/` directory. This file allows you to specify:
 
 *   **`paths`**: Directories for data, exports, and logs, including default chassis and I/O files.
 *   **`graph_loader`**: Parameters for graph creation, such as `min_direct_node_distance_mm`, `allow_projection_on_edge`, and `skip_self_loops`.
@@ -123,7 +123,7 @@ Ensure `config.yaml` is correctly configured before running the application.
 
 ### Running the Application
 
-To start the CONVIO GUI:
+To start the ConvIO GUI:
 
 ```bash
 python main.py
@@ -150,17 +150,17 @@ python main.py
     *   Click "Run Clustering" to perform agglomerative hierarchical clustering for the selected linkage method using chassis path-based distances.
     *   Alternatively, click "Compae All Linkage Methods" to run the optimization with all linkage methods and get a comparison table, with the best method automatically selected for visualization.
     *   The clustering assigns I/O nodes to physically meaningful zones based on wiring-relevant distances rather than purely geometric proximity.
-    *   The "Initial Clustering" tab will display the optimised zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
+    *   The "Initial Clustering" tab will display the optimized zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
     *   Detailed length and cost metrics for the zonal architecture will be updated in the control panel.
 
 4. **Centroid Optimization (Step 4)**:
-    * Click "Run Iterative Optimisation" to refine each cluster by relocating the I/O aggregator to the centroid candidate with the lowest intra-zone wiring cost.
+    * Click "Run Iterative Optimization" to refine each cluster by relocating the I/O aggregator to the centroid candidate with the lowest intra-zone wiring cost.
     * Candidate positions are evaluated using precomputed chassis path lengths and final connections to the I/O nodes.
     * The optimization iterates until convergence or until the user-defined maximum number of iterations is reached.
-    * The "Centroid Optimisation" tab will display the optimised zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
+    * The "Centroid Optimization" tab will display the optimized zonal architecture, showing clusters, I/O aggregators (centroids), and wiring paths.
 
 5. **Communication Topology Generation (Step 5)**:
-    * Click "Run Communication Network" to connect the HPC with the optimised I/O aggregators and the supported communication topologies.
+    * Click "Run Communication Network" to connect the HPC with the optimized I/O aggregators and the supported communication topologies.
     * Supported topologies include `bus`, `redundant bus`, and `star ring`.
     * The resulting architecture is visualised in the "Bus Topology", "Redundant Bus", and "Star and Ring" tabs, including clusters, I/O aggregators, wiring paths, and communication links.
     * Detailed length and cost metrics are updated in the control panel.
@@ -175,7 +175,7 @@ python main.py
 
 ```
 .
-├── CONVIO/
+├── ConvIO/
 │   ├── config.yaml                 # Application configuration
 │   ├── main.py                     # Main GUI application entry point
 │   ├── requirements.txt            # Python dependencies
